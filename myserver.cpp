@@ -1,8 +1,9 @@
 #include "myserver.h"
 #include "qserverrunnable.h"
+#include "updatingdata.h"
 
 MyServer::MyServer(QObject* parent):
-    QTcpServer(parent)
+    QTcpServer(parent), upd(new UpdatingData())
 {
     if(listen(QHostAddress::Any, 1234)){
         qDebug()<<"Listening...";
@@ -10,7 +11,6 @@ MyServer::MyServer(QObject* parent):
     else{
         qDebug()<<"Error while starting!";
     }
-
     threadPool = new QThreadPool(this);
     //threadPool->setMaxThreadCount(20);
 }

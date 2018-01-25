@@ -4,6 +4,8 @@
 #include<QTcpServer>
 #include<QThreadPool>
 
+#include "updatingdata.h"
+
 class MyServer : public QTcpServer
 {
     Q_OBJECT
@@ -13,6 +15,7 @@ public:
 
 private:
     QThreadPool *threadPool;
+    UpdatingData *upd;
 };
 
 #endif // MYSERVER_H
