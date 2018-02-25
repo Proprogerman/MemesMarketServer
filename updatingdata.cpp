@@ -81,11 +81,12 @@ void UpdatingData::updatePop(QJsonArray arr){
         int likes = obj.value("likes").toObject().value("count").toInt();
         int views = obj.value("views").toObject().value("count").toInt();
         int reposts = obj.value("reposts").toObject().value("count").toInt();
-        double popValue = (likes + reposts * 5.0)/ views;
+        //double popValue = (likes + reposts * 5.0)/ views;
+        int popValue = qrand()% 201 - 100;                        //пределы значения популярности от -100 до 100
 
         int memeId = query.value(rec.indexOf("id")).toInt();
         QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
-        if(popArr.size() < 6){                                    //magic number: 6- ограничение количества значений
+        if(popArr.size() < 6){                                    //magic number: 6- ограничение количества значений популярности
             popArr.append(popValue);
         }
         else if(popArr.size() == 6){

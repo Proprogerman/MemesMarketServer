@@ -1,5 +1,5 @@
-#ifndef QSERVERRUNNABLE_H
-#define QSERVERRUNNABLE_H
+#ifndef SERVERRUNNABLE_H
+#define SERVERRUNNABLE_H
 
 #include "cscommunication.h"
 
@@ -10,11 +10,11 @@
 #include<QEventLoop>
 #include<QThread>
 
-class QServerRunnable : public QObject, public QRunnable
+class ServerRunnable : public QObject, public QRunnable
 {
     Q_OBJECT
 public:
-    explicit QServerRunnable(QObject* parent = 0);
+    explicit ServerRunnable(QObject* parent = 0);
 
     void setDescriptor(qintptr desc);
     void run();
@@ -30,4 +30,4 @@ public slots:
     void onDisconnected();
 };
 
-#endif //QSERVERRUNNABLE_H
+#endif //SERVERRUNNABLE_H

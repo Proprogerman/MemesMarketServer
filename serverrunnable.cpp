@@ -1,17 +1,17 @@
-#include "qserverrunnable.h"
+#include "serverrunnable.h"
 #include "cscommunication.h"
 
-QServerRunnable::QServerRunnable(QObject* parent): QObject(parent)
+ServerRunnable::ServerRunnable(QObject* parent): QObject(parent)
 {
 
 }
 
-void QServerRunnable::setDescriptor(qintptr desc)
+void ServerRunnable::setDescriptor(qintptr desc)
 {
     m_descriptor = desc;
 }
 
-void QServerRunnable::run()
+void ServerRunnable::run()
 {
     m_eventLoop = new QEventLoop();
     m_socket = new QTcpSocket();
@@ -20,15 +20,15 @@ void QServerRunnable::run()
     m_socket->setSocketDescriptor(m_descriptor);
     qDebug()<<"socketDescriptor: "<<m_descriptor;
 
-    connect(m_socket, &QTcpSocket::readyRead, this, &QServerRunnable::onReadyRead, Qt::DirectConnection);
-    connect(m_socket, &QTcpSocket::disconnected, this, &QServerRunnable::onDisconnected, Qt::DirectConnection);
+    connect(m_socket, &QTcpSocket::readyRead, this, &ServerRunnable::onReadyRead, Qt::DirectConnection);
+    connect(m_socket, &QTcpSocket::disconnected, this, &ServerRunnable::onDisconnected, Qt::DirectConnection);
 
     m_eventLoop->exec();
     delete m_socket;
     delete m_eventLoop;
 }
 
-void QServerRunnable::onReadyRead()
+void ServerRunnable::onReadyRead()
 {
     qDebug()<<"onReadyRead()";
 
@@ -40,7 +40,7 @@ void QServerRunnable::onReadyRead()
     //QThread::sleep(5);
 }
 
-void QServerRunnable::onDisconnected()
+void ServerRunnable::onDisconnected()
 {
     qDebug()<<"onDiconnected()";
     m_eventLoop->exit();
