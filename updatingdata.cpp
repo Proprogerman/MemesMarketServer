@@ -17,6 +17,7 @@
 UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     mngr(new QNetworkAccessManager()), timer(new QTimer())
 {
+    connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connectToDatabase();
     connect(mngr, &QNetworkAccessManager::finished, [=](QNetworkReply *reply){getVkResponse(reply);});
 
@@ -34,7 +35,6 @@ void UpdatingData::connectToDatabase(){
         qDebug()<<"database is not open!";
     else{
         qDebug()<<"database is open...";
-        connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
         timer->start(10000);
     }
 }
@@ -56,58 +56,108 @@ void UpdatingData::vkApi(){
 
 void UpdatingData::onTimerTriggered(){
     QSqlQuery query(database);
-    query.exec("SELECT id, vk_id FROM memes;");
+    if(query.exec("SELECT id, vk_id FROM memes;")){
 
-    QSqlRecord rec = query.record();
-    int idIndex = rec.indexOf("id");
-    int vk_idIndex = rec.indexOf("vk_id");
+        QSqlRecord rec = query.record();
+        int idIndex = rec.indexOf("id");
+        int vk_idIndex = rec.indexOf("vk_id");
 
-    while(query.next()){
-        memesMap.insert(query.value(idIndex).toInt(), query.value(vk_idIndex).toString());
+        while(query.next()){
+            memesMap.insert(query.value(idIndex).toInt(), query.value(vk_idIndex).toString());
+        }
+        if(!query.next()){
+            vkApi();
+        }
     }
-    if(!query.next()){
-        vkApi();
-    }
+    else
+        database.open();
 }
 
-void UpdatingData::updatePop(QJsonArray arr){
+void UpdatingData::updateMemesPopValues(QJsonArray arr){
     QSqlQuery query(database);
-    query.exec("SELECT id, pop_values FROM memes;");
-    QSqlRecord rec = query.record();
-    query.first();
+    if(query.exec("SELECT id, pop_values FROM memes;")){
+        QSqlRecord rec = query.record();
+        query.first();
 
-    for(int i = 0; i < arr.size(); i++){
-        QJsonObject obj = arr[i].toObject();
-        int likes = obj.value("likes").toObject().value("count").toInt();
-        int views = obj.value("views").toObject().value("count").toInt();
-        int reposts = obj.value("reposts").toObject().value("count").toInt();
-        //double popValue = (likes + reposts * 5.0)/ views;
-        int popValue = qrand()% 201 - 100;                        //пределы значения популярности от -100 до 100
+        qDebug()<<"БАЗА ДАННЫХ: "<<database.isOpen();
 
-        int memeId = query.value(rec.indexOf("id")).toInt();
-        QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
-        if(popArr.size() < 6){                                    //magic number: 6- ограничение количества значений популярности
-            popArr.append(popValue);
-        }
-        else if(popArr.size() == 6){
-            for(int i = 0; i < popArr.size() - 1; i++){
-                popArr[i] = popArr[i + 1];
+        for(int i = 0; i < arr.size(); i++){
+            QJsonObject obj = arr[i].toObject();
+            int likes = obj.value("likes").toObject().value("count").toInt();
+            int views = obj.value("views").toObject().value("count").toInt();
+            int reposts = obj.value("reposts").toObject().value("count").toInt();
+            //double popValue = (likes + reposts * 5.0)/ views;
+            int popValue = qrand() % 201 - 100;                        //пределы значения популярности от -100 до 100
+
+            int memeId = query.value(rec.indexOf("id")).toInt();
+            QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
+            if(popArr.size() < 6){                                    //magic number: 6- ограничение количества значений популярности
+                popArr.append(popValue);
             }
-            popArr[popArr.size() - 1] = popValue;
+            else if(popArr.size() == 6){
+                for(int i = 0; i < popArr.size() - 1; i++){
+                    popArr[i] = popArr[i + 1];
+                }
+                popArr[popArr.size() - 1] = popValue;
+            }
+            QSqlQuery updateQuery;
+            QJsonDocument doc;
+            doc.setArray(popArr);
+            updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
+                             .arg(QString(doc.toJson(QJsonDocument::Compact)))
+                             .arg(memeId));
+            qDebug()<<"LAST QUERY: "<<updateQuery.lastQuery();
+            query.next();
         }
-        QSqlQuery updateQuery;
-        QJsonDocument doc;
-        doc.setArray(popArr);
-        updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
-                         .arg(QString(doc.toJson(QJsonDocument::Compact)))
-                         .arg(memeId));
-        qDebug()<<"LAST QUERY: "<<updateQuery.lastQuery();
-        query.next();
+        updateUsersPopValues();
     }
+    else
+        database.open();
 }
 
 void UpdatingData::getVkResponse(QNetworkReply *reply){
     QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
     QJsonArray arr = doc.object().value("response").toArray();
-    updatePop(arr);
+    updateMemesPopValues(arr);
+}
+
+void UpdatingData::updateUsersPopValues(){
+    QSqlQuery namesQuery(database);
+    if(namesQuery.exec("SELECT name FROM users")){
+        while(namesQuery.next()){
+            QString name = namesQuery.value(0).toString();
+            QSqlQuery updateQuery(database);
+            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, weight, startPopValue, pop_value FROM memes "
+                            "INNER JOIN user_memes ON memes.id = meme_id "
+                            "INNER JOIN category_weight ON memes.category = category_weight.category "
+                            "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
+                            .arg(name));
+            QSqlRecord rec = updateQuery.record();
+
+            int memePopValuesIndex = rec.indexOf("pop_values");
+            int weightIndex = rec.indexOf("weight");
+            int userPopValueIndex = rec.indexOf("pop_value");
+
+
+            int popValueChange = 0;
+            while(updateQuery.next()){
+                QJsonArray popArr = QJsonDocument::fromJson(updateQuery.value(memePopValuesIndex).toByteArray()).array();
+                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(weightIndex).toDouble());
+            }
+            if(updateQuery.size() != 0){
+                QSqlQuery query(database);
+                updateQuery.last();
+                int userPopValue = updateQuery.value(userPopValueIndex).toInt();
+                //qDebug()<<"userPopValue: "<<updateQuery.value(userPopValueIndex).toInt();
+                if(userPopValue + popValueChange > 0)
+                    query.exec(QString("UPDATE users SET pop_value = pop_value + %1 WHERE name = '%2';").arg(popValueChange).arg(name));
+                else
+                    query.exec(QString("UPDATE users SET pop_value = 0 WHERE name = '%1';").arg(name));
+                qDebug()<<"name: "<< name;
+                qDebug()<<"popValueChange: " << popValueChange;
+            }
+        }
+    }
+    else
+        database.open();
 }

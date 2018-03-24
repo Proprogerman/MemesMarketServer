@@ -22,8 +22,9 @@ public:
     void connectToDatabase();
     //void vkApi(QString postId);
     void vkApi();
-    void updatePop(QJsonArray arr);
+    void updateMemesPopValues(QJsonArray arr);
     void getVkResponse(QNetworkReply *reply);
+    void updateUsersPopValues();
 private:
     QNetworkAccessManager *mngr;
     QTimer *timer;

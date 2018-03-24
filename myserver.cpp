@@ -13,7 +13,7 @@ MyServer::MyServer(QObject* parent):
     else{
         qDebug()<<"Error while starting!";
     }
-    threadPool->setMaxThreadCount(3);
+    threadPool->setMaxThreadCount(10);
 }
 
 void MyServer::incomingConnection(qintptr handle)

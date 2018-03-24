@@ -19,16 +19,19 @@
 class CSCommunication : public QObject
 {
     Q_OBJECT
-
 public:
     explicit CSCommunication(QTcpSocket *tcpSocket, QObject *parent = nullptr);
 
     void checkName(const QString &name);
     void signUp(QJsonObject &jsonObj);
+    void getUserData(const QString &userName);
     void getMemeListOfUser(const QJsonObject &jsonObj);
     void getMemeListWithCategory(const QJsonObject &jsonObj);
     void getMemeDataForUser(const QString &memeName, const QString &userName);
+    void getMemeData(const QString &memeName);
     void getMemesCategories();
+    void forceMeme(const QJsonObject &jsonObj);
+    void unforceMeme(const QString &memeName, const QString &userName);
 
     QString getName();
     QString getPassword();
