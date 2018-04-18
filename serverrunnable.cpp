@@ -44,5 +44,6 @@ void ServerRunnable::onDisconnected()
 {
     qDebug()<<"onDiconnected()";
     m_eventLoop->exit();
+    delete m_comm;
 }
 

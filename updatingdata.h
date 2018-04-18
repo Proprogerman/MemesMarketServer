@@ -25,12 +25,17 @@ public:
     void updateMemesPopValues(QJsonArray arr);
     void getVkResponse(QNetworkReply *reply);
     void updateUsersPopValues();
+    void updateUsersCreativity();
+    void updateUsersShekels();
 private:
     QNetworkAccessManager *mngr;
     QTimer *timer;
+    QTimer *creativityTimer;
     QSqlDatabase database;
     QMap<int, QString> memesMap;
     bool isConnected = false;
+
+    const int memesPopValuesCount = 12;
 signals:
     void testSignal();
 

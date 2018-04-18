@@ -15,9 +15,12 @@
 
 
 UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
-    mngr(new QNetworkAccessManager()), timer(new QTimer())
+    mngr(new QNetworkAccessManager()), timer(new QTimer()),
+    creativityTimer(new QTimer())
 {
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
+    connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
+    connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
     connectToDatabase();
     connect(mngr, &QNetworkAccessManager::finished, [=](QNetworkReply *reply){getVkResponse(reply);});
 
@@ -36,6 +39,7 @@ void UpdatingData::connectToDatabase(){
     else{
         qDebug()<<"database is open...";
         timer->start(10000);
+        creativityTimer->start(60000);
     }
 }
 
@@ -75,11 +79,9 @@ void UpdatingData::onTimerTriggered(){
 
 void UpdatingData::updateMemesPopValues(QJsonArray arr){
     QSqlQuery query(database);
-    if(query.exec("SELECT id, pop_values FROM memes;")){
+    if(query.exec("SELECT id, pop_values, edited_by_user FROM memes;")){
         QSqlRecord rec = query.record();
         query.first();
-
-        qDebug()<<"БАЗА ДАННЫХ: "<<database.isOpen();
 
         for(int i = 0; i < arr.size(); i++){
             QJsonObject obj = arr[i].toObject();
@@ -90,23 +92,31 @@ void UpdatingData::updateMemesPopValues(QJsonArray arr){
             int popValue = qrand() % 201 - 100;                        //пределы значения популярности от -100 до 100
 
             int memeId = query.value(rec.indexOf("id")).toInt();
-            QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
-            if(popArr.size() < 6){                                    //magic number: 6- ограничение количества значений популярности
-                popArr.append(popValue);
-            }
-            else if(popArr.size() == 6){
-                for(int i = 0; i < popArr.size() - 1; i++){
-                    popArr[i] = popArr[i + 1];
+            bool editedByUser = query.value(rec.indexOf("edited_by_user")).toBool();
+            if(!editedByUser){
+                QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
+                if(popArr.size() < memesPopValuesCount){
+                    popArr.append(popValue);
                 }
-                popArr[popArr.size() - 1] = popValue;
+                else if(popArr.size() == memesPopValuesCount){
+                    for(int i = 0; i < popArr.size() - 1; i++){
+                        popArr[i] = popArr[i + 1];
+                    }
+                    popArr[popArr.size() - 1] = popValue;
+                }
+                QSqlQuery updateQuery;
+                QJsonDocument doc;
+                doc.setArray(popArr);
+                updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
+                                 .arg(QString(doc.toJson(QJsonDocument::Compact)))
+                                 .arg(memeId));
+                qDebug()<<"LAST QUERY: "<<updateQuery.lastQuery();
             }
-            QSqlQuery updateQuery;
-            QJsonDocument doc;
-            doc.setArray(popArr);
-            updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
-                             .arg(QString(doc.toJson(QJsonDocument::Compact)))
-                             .arg(memeId));
-            qDebug()<<"LAST QUERY: "<<updateQuery.lastQuery();
+            else{
+                QSqlQuery updateQuery;
+                updateQuery.exec(QString("UPDATE memes SET edited_by_user = 0 WHERE id = '%1';")
+                                 .arg(memeId));
+            }
             query.next();
         }
         updateUsersPopValues();
@@ -156,6 +166,52 @@ void UpdatingData::updateUsersPopValues(){
                 qDebug()<<"name: "<< name;
                 qDebug()<<"popValueChange: " << popValueChange;
             }
+        }
+    }
+    else
+        database.open();
+}
+
+void UpdatingData::updateUsersCreativity()
+{
+    QSqlQuery creativityQuery(database);
+    if(creativityQuery.exec("SELECT name, creativity FROM users;")){
+        while(creativityQuery.next()){
+            QSqlRecord rec = creativityQuery.record();
+            QString name = creativityQuery.value(rec.indexOf("name")).toString();
+            int creativity = creativityQuery.value(rec.indexOf("creativity")).toInt();
+            int creativityIncrement = 20;                                       // может быть индивидуальным
+            QSqlQuery updateQuery(database);
+            if(creativity + creativityIncrement <= 100){
+                updateQuery.exec(QString("UPDATE users SET creativity = creativity + '%1' WHERE name = '%2';")
+                                 .arg(creativityIncrement)
+                                 .arg(name));
+            }
+            else{
+                updateQuery.exec(QString("UPDATE users SET creativity = 100 WHERE name = '%1';")
+                                 .arg(name));
+            }
+        }
+    }
+    else
+        database.open();
+}
+
+void UpdatingData::updateUsersShekels()
+{
+    QSqlQuery shekelsQuery(database);
+    if(shekelsQuery.exec("SELECT name, shekels FROM users;")){
+        QSqlRecord rec = shekelsQuery.record();
+        int nameIndex = rec.indexOf("name");
+        int shekelsIndex = rec.indexOf("shekels");
+        while(shekelsQuery.next()){
+            QString name = shekelsQuery.value(nameIndex).toString();
+            int shekels = shekelsQuery.value(shekelsIndex).toInt();
+            int shekelsIncrement = 50;                                   // может быть индивидуальным
+            QSqlQuery updateQuery(database);
+            updateQuery.exec(QString("UPDATE users SET shekels = shekels + '%1' WHERE name = '%2' AND online = 1;")
+                                    .arg(shekelsIncrement)
+                                    .arg(name));
         }
     }
     else
