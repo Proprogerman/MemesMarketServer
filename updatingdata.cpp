@@ -4,9 +4,6 @@
 #include <QJsonObject>
 #include <QJsonArray>
 
-#include <QNetworkRequest>
-#include <QNetworkReply>
-
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QSqlError>
@@ -22,7 +19,6 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
     connectToDatabase();
-    connect(mngr, &QNetworkAccessManager::finished, [=](QNetworkReply *reply){getVkResponse(reply);});
 
     qDebug()<<"UpdatingData constructor";
 }
@@ -45,17 +41,30 @@ void UpdatingData::connectToDatabase(){
 
 void UpdatingData::vkApi(){
     QMapIterator<int, QString> memesIter(memesMap);
-    QString apiRequest;
-    apiRequest.append("https://api.vk.com/method/wall.getById?posts=");
+    QString postsRequestString;
+    QString wallRequestString;
+    postsRequestString.append("https://api.vk.com/method/wall.getById?posts=");
     while(memesIter.hasNext()){
         memesIter.next();
-        apiRequest.append("-" + memesIter.value());
+        wallRequestString.append("https://api.vk.com/method/wall.get?owner_id=");
+        postsRequestString.append(memesIter.value());
+        int idSize = 0;
+        for(int i = 0; memesIter.value().at(i) != '_'; i++){
+            idSize = i;
+        }
+        wallRequestString.append(memesIter.value().mid(0, idSize + 1));
+        wallRequestString.append("&access_token=094b40d2094b40d2094b40d29e0917b1eb0094b094b40d2501aa9b9710314fdf82f8efd"
+                                 "&count=1&v=5.74");
+        QNetworkReply *wallReply = mngr->get(QNetworkRequest(QUrl(wallRequestString)));
+        connect(wallReply, &QNetworkReply::finished, [=](){setPostsCount(wallReply);});
         if(memesIter.hasNext())
-            apiRequest.append(",");
+            postsRequestString.append(",");
     }
-    apiRequest.append("&v=5.69");
+    postsRequestString.append("&access_token=094b40d2094b40d2094b40d29e0917b1eb0094b094b40d2501aa9b9710314fdf82f8efd"
+                              "&extended=1&fields=members_count&v=5.74");
 
-    mngr->get(QNetworkRequest(QUrl(apiRequest)));
+    QNetworkReply *postsReply = mngr->get(QNetworkRequest(QUrl(postsRequestString)));
+    connect(postsReply, &QNetworkReply::finished, [=](){updateMemesPopValues(postsReply);});
 }
 
 void UpdatingData::onTimerTriggered(){
@@ -77,19 +86,33 @@ void UpdatingData::onTimerTriggered(){
         database.open();
 }
 
-void UpdatingData::updateMemesPopValues(QJsonArray arr){
+void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
     QSqlQuery query(database);
     if(query.exec("SELECT id, pop_values, edited_by_user FROM memes;")){
         QSqlRecord rec = query.record();
         query.first();
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QJsonObject obj = doc.object().value("response").toObject();
+        QJsonArray items = obj.value("items").toArray();
+        QJsonArray groups = obj.value("groups").toArray();
 
-        for(int i = 0; i < arr.size(); i++){
-            QJsonObject obj = arr[i].toObject();
-            int likes = obj.value("likes").toObject().value("count").toInt();
-            int views = obj.value("views").toObject().value("count").toInt();
-            int reposts = obj.value("reposts").toObject().value("count").toInt();
-            //double popValue = (likes + reposts * 5.0)/ views;
-            int popValue = qrand() % 201 - 100;                        //пределы значения популярности от -100 до 100
+        for(int i = 0; i < items.size(); i++){
+            QJsonObject item = items[i].toObject();
+            int likes = item.value("likes").toObject().value("count").toInt();
+            int reposts = item.value("reposts").toObject().value("count").toInt();
+            int comments = item.value("comments").toObject().value("count").toInt();
+            int views = item.value("views").toObject().value("count").toInt();
+            int ownerId = item.value("owner_id").toInt();
+            int groupIndex = 0;
+
+            for(int i = 0; i < groups.size(); i++){
+                if(groups[i].toObject().value("owner_id").toInt() == ownerId)
+                    groupIndex = i;
+            }
+            int members = groups[groupIndex].toObject().value("members_count").toInt();
+
+            unsigned int activity = views * likes * comments * reposts;
+            int popValue = ceil(activity * 1.0 / members);
 
             int memeId = query.value(rec.indexOf("id")).toInt();
             bool editedByUser = query.value(rec.indexOf("edited_by_user")).toBool();
@@ -123,12 +146,16 @@ void UpdatingData::updateMemesPopValues(QJsonArray arr){
     }
     else
         database.open();
+    qDebug()<<"_________________________________________";
 }
 
-void UpdatingData::getVkResponse(QNetworkReply *reply){
+void UpdatingData::setPostsCount(QNetworkReply *reply)
+{
     QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-    QJsonArray arr = doc.object().value("response").toArray();
-    updateMemesPopValues(arr);
+    QJsonObject obj = doc.object().value("response").toObject();
+    int postCount = obj.value("count").toInt();
+    int ownerId = obj.value("items").toArray().first().toObject().value("owner_id").toInt();
+    postsCount.insert(ownerId, postCount);
 }
 
 void UpdatingData::updateUsersPopValues(){
@@ -137,34 +164,48 @@ void UpdatingData::updateUsersPopValues(){
         while(namesQuery.next()){
             QString name = namesQuery.value(0).toString();
             QSqlQuery updateQuery(database);
-            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, weight, startPopValue, pop_value FROM memes "
-                            "INNER JOIN user_memes ON memes.id = meme_id "
-                            "INNER JOIN category_weight ON memes.category = category_weight.category "
-                            "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
-                            .arg(name));
+//            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, weight, startPopValue, pop_value FROM memes "
+//                            "INNER JOIN user_memes ON memes.id = meme_id "
+//                            "INNER JOIN category_weight ON memes.category = category_weight.category "
+//                            "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
+//                            .arg(name));
+            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, feedbackRate, startPopValue, pop_value, "
+                                     "user_memes.creativity FROM memes "
+                                     "INNER JOIN user_memes ON memes.id = meme_id "
+                                     "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
+                                     .arg(name));
             QSqlRecord rec = updateQuery.record();
 
             int memePopValuesIndex = rec.indexOf("pop_values");
-            int weightIndex = rec.indexOf("weight");
+//            int weightIndex = rec.indexOf("weight");
+//            int feedbackRateIndex = rec.indexOf("feedbackRate");
             int userPopValueIndex = rec.indexOf("pop_value");
-
+            int startPopValueIndex = rec.indexOf("startPopValue");
+            int creativityIndex = rec.indexOf("creativity");
 
             int popValueChange = 0;
             while(updateQuery.next()){
                 QJsonArray popArr = QJsonDocument::fromJson(updateQuery.value(memePopValuesIndex).toByteArray()).array();
-                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(weightIndex).toDouble());
+//                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(weightIndex).toDouble());
+                int currentValue = popArr.last().toInt();
+                int startPopValue = updateQuery.value(startPopValueIndex).toInt();
+//                double feedbackrate = updateQuery.value(feedbackRateIndex).toDouble();
+                double creativityRate = updateQuery.value(creativityIndex).toDouble() / 100;
+                popValueChange += static_cast<int>(currentValue * (1 + creativityRate) - startPopValue);
+//                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(feedbackRateIndex).toDouble());
             }
             if(updateQuery.size() != 0){
                 QSqlQuery query(database);
                 updateQuery.last();
                 int userPopValue = updateQuery.value(userPopValueIndex).toInt();
                 //qDebug()<<"userPopValue: "<<updateQuery.value(userPopValueIndex).toInt();
-                if(userPopValue + popValueChange > 0)
-                    query.exec(QString("UPDATE users SET pop_value = pop_value + %1 WHERE name = '%2';").arg(popValueChange).arg(name));
+                if(userPopValue + popValueChange > 0){
+                    query.exec(QString("UPDATE users SET pop_value = pop_value + %1 WHERE name = '%2';")
+                               .arg(popValueChange)
+                               .arg(name));
+                }
                 else
                     query.exec(QString("UPDATE users SET pop_value = 0 WHERE name = '%1';").arg(name));
-                qDebug()<<"name: "<< name;
-                qDebug()<<"popValueChange: " << popValueChange;
             }
         }
     }

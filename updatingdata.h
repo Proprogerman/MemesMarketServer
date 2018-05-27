@@ -22,8 +22,6 @@ public:
     void connectToDatabase();
     //void vkApi(QString postId);
     void vkApi();
-    void updateMemesPopValues(QJsonArray arr);
-    void getVkResponse(QNetworkReply *reply);
     void updateUsersPopValues();
     void updateUsersCreativity();
     void updateUsersShekels();
@@ -33,6 +31,7 @@ private:
     QTimer *creativityTimer;
     QSqlDatabase database;
     QMap<int, QString> memesMap;
+    QMap<int, int> postsCount;
     bool isConnected = false;
 
     const int memesPopValuesCount = 12;
@@ -41,6 +40,8 @@ signals:
 
 public slots:
     void onTimerTriggered();
+    void updateMemesPopValues(QNetworkReply *reply);
+    void setPostsCount(QNetworkReply *reply);
 //    void getVkResponse(QNetworkReply *reply);
 };
 

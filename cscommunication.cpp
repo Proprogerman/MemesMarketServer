@@ -16,6 +16,8 @@
 
 #include <iterator>
 
+#include <QCryptographicHash>
+
 CSCommunication::CSCommunication(QTcpSocket *tcpSocket, QObject *parent) : respSock(tcpSocket),
     QObject(parent)
 {
@@ -58,6 +60,9 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     else if(requestType == "signUp"){
         signUp(jsonObj);
     }
+    else if(requestType == "signIn"){
+        signIn(jsonObj);
+    }
     else if(requestType == "getUserData"){
         getUserData(jsonObj);
     }
@@ -95,6 +100,17 @@ void CSCommunication::setUserOffline()
     }
 }
 
+QByteArray CSCommunication::hashPassword(const QString &password)
+{
+    QByteArray passwordHash = QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha224);
+
+    for(int i = 0; i < 4; i++){
+        passwordHash = QCryptographicHash::hash(passwordHash, QCryptographicHash::Sha224);
+    }
+
+    return passwordHash.toHex();
+}
+
 void CSCommunication::onNameAvailable(bool val){
     QJsonObject jsonObj{
         { "responseType", "checkNameResponse" },
@@ -103,8 +119,6 @@ void CSCommunication::onNameAvailable(bool val){
 
     respSock->write(QJsonDocument(jsonObj).toBinaryData());
     respSock->flush();
-    respSock->waitForBytesWritten(3000);
-    QThread::msleep(100);
 }
 
 void CSCommunication::onClientNameChanged()
@@ -139,12 +153,39 @@ void CSCommunication::checkName(const QString &name){
 
 void CSCommunication::signUp(QJsonObject &jsonObj){
     QSqlQuery query(database);
-    query.prepare("INSERT INTO users (name, password) VALUES(:name, :password);");
+
+    QByteArray passwordHash = hashPassword(jsonObj["user_password"].toString());
+
+    query.prepare("INSERT INTO users (name, passwordHash, creativity, shekels) VALUES(:name, :passwordHash, 100, 100);");
     query.bindValue(":name", jsonObj["user_name"].toString());
-    query.bindValue(":password", jsonObj["user_password"].toString());
+    query.bindValue(":passwordHash", passwordHash);
     qDebug()<<"signUp(): \n"<<"name: "<<jsonObj["user_name"].toString()<<"\n"<<jsonObj["user_password"].toString()<<endl;
     if(!query.exec())
         database.open();
+}
+
+void CSCommunication::signIn(QJsonObject &jsonObj)
+{
+    QSqlQuery query(database);
+
+    QByteArray passwordHash = hashPassword(jsonObj["user_password"].toString());
+    QString queryString = QString("SELECT passwordHash FROM users WHERE name = '%1';").arg(jsonObj["user_name"].toString());
+    if(query.exec(queryString)){
+        QSqlRecord rec = query.record();
+        query.first();
+        QByteArray userPasswordHash = query.value(rec.indexOf("passwordHash")).toByteArray();
+        QJsonObject responseObj;
+        responseObj.insert("responseType", "signInResponse");
+        qDebug()<<passwordHash<<"   ::::::::   "<<userPasswordHash;
+        if(userPasswordHash == passwordHash){
+            qDebug()<<"password is correct!";
+        }
+        else
+            qDebug()<<"password is wrong!";
+    }
+    else
+        database.open();
+
 }
 
 void CSCommunication::getUserData(const QJsonObject &jsonObj)
@@ -154,7 +195,7 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
                                        .arg(jsonObj["user_name"].toString());
 
     QSqlQuery memesQuery(database);
-    QString memesQueryString = QString( "SELECT memes.name, memes.pop_values, startPopValue, memes.image FROM users "
+    QString memesQueryString = QString( "SELECT memes.name, memes.pop_values, startPopValue, feedbackRate, user_memes.creativity, memes.image FROM users "
                                         "INNER JOIN user_memes ON users.id = user_id "
                                         "INNER JOIN memes ON meme_id = memes.id WHERE users.name = '%1';")
                                         .arg(jsonObj["user_name"].toString());
@@ -182,6 +223,9 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
             int memeNameIndex = rec.indexOf("name");
             int memePopIndex = rec.indexOf("pop_values");
             int startPopValueIndex = rec.indexOf("startPopValue");
+            int feedbackRateIndex = rec.indexOf("feedbackRate");
+            int creativityIndex = rec.indexOf("creativity");
+
             int memeImageUrlIndex = rec.indexOf("image");
 
             qDebug() << "QUERY SIZE= " << memesQuery.size();
@@ -197,17 +241,20 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
                 memeObj.insert("memeName", memesQuery.value(memeNameIndex).toString());
                 memeObj.insert("popValues", QJsonDocument::fromJson(memesQuery.value(memePopIndex).toByteArray()).array());
                 memeObj.insert("startPopValue", memesQuery.value(startPopValueIndex).toInt());
+                memeObj.insert("feedbackRate", memesQuery.value(feedbackRateIndex).toDouble());
+                memeObj.insert("creativity", memesQuery.value(creativityIndex).toInt());
                 //qDebug()<<"POP VALUES FROM GETMEMELISTWITHCATEGORY ::::::::" << QJsonDocument::fromJson(memesQuery.value(memePopIndex).toByteArray()).array();
                 if(!memesToUpdatePopValues.contains(memesQuery.value(memeNameIndex).toString())){
                         qDebug()<<"NE SODERJIT!!!!!!!!!!!!!!!!!!!!!!!!!!";
-                        QImage memeImage/*FullSize*/;
+                        QImage memeImage;
                         QJsonObject memeImageObj;
-                        memeImage/*FullSize*/.load(memesQuery.value(memeImageUrlIndex).toString(), "JPG");
-                        //QImage memeImage = memeImageFullSize.scaled(100, 100, Qt::KeepAspectRatio);
+                        memeImage.load(memesQuery.value(memeImageUrlIndex).toString(), "JPG");
                         QByteArray byteArr;
                         QBuffer buff(&byteArr);
                         buff.open(QIODevice::WriteOnly);
-                        memeImage.save(&buff, "JPG");
+                        QImage resizedImage = memeImage.scaled(200, 200, Qt::KeepAspectRatio);
+//                        memeImage.save(&buff, "JPG");
+                        resizedImage.save(&buff, "JPG");
                         auto encoded = buff.data().toBase64();
                         memeObj.insert("imageName",QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName());
                         memeImageObj.insert("responseType", "memeImageResponse");
@@ -224,13 +271,9 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
             responseObj.insert("memeList", QJsonArray::fromVariantList(memeList));
             respSock->write(QJsonDocument(responseObj).toBinaryData());
             respSock->flush();
-            respSock->waitForBytesWritten(3000);
-            QThread::msleep(100);
             for(int i = 0; i < memeImageVector.size(); i++){
                 respSock->write(QJsonDocument(memeImageVector[i]).toBinaryData());
                 respSock->flush();
-                respSock->waitForBytesWritten(3000);
-                QThread::msleep(100);
             }
         }
         else{
@@ -248,8 +291,9 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
 {
     QSqlQuery query(database);
     QString category = jsonObj.value("category").toString();
-    QString queryString = QString("SELECT name, image, pop_values FROM memes WHERE category = '%1';")
-            .arg(category);
+    QString queryString = QString("SELECT name, image, pop_values FROM memes "
+                                  "WHERE category = '%1';")
+                          .arg(category);
     if(query.exec(queryString)){
         QSqlRecord rec = query.record();
         qDebug()<<"query record:"<<rec;
@@ -257,6 +301,7 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
         int memeNameIndex = rec.indexOf("name");
         int memePopIndex = rec.indexOf("pop_values");
         int memeImageUrlIndex = rec.indexOf("image");
+        int weightIndex = rec.indexOf("weight");
 
         QVariantList memeList;
         QVector<QJsonObject> memeImageVector;
@@ -277,7 +322,9 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
                     QByteArray byteArr;
                     QBuffer buff(&byteArr);
                     buff.open(QIODevice::WriteOnly);
-                    memeImage.save(&buff, "JPG");
+                    QImage resizedImage = memeImage.scaled(200, 200, Qt::KeepAspectRatio);
+                    resizedImage.save(&buff, "JPG");
+//                    memeImage.save(&buff, "JPG");
                     auto encoded = buff.data().toBase64();
                     memeObj.insert("imageName",QUrl(query.value(memeImageUrlIndex).toString()).fileName());
                     memeImageObj.insert("responseType", "memeImageResponse");
@@ -295,13 +342,9 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
         jsonMemeList.insert("memeList", QJsonArray::fromVariantList(memeList));
         respSock->write(QJsonDocument(jsonMemeList).toBinaryData());
         respSock->flush();
-        respSock->waitForBytesWritten(3000);
-        QThread::msleep(100);
         for(int i = 0; i < memeImageVector.size(); i++){
             respSock->write(QJsonDocument(memeImageVector[i]).toBinaryData());
             respSock->flush();
-            respSock->waitForBytesWritten(3000);
-            QThread::msleep(100);
         }
     }
     else
@@ -334,8 +377,6 @@ void CSCommunication::getMemeDataForUser(const QString &memeName, const QString 
         qDebug()<<"POP VALUES FOR MEME " << memeName << " ::::::: " << QJsonDocument::fromJson(query.value(memePopIndex).toByteArray()).array();
         respSock->write(QJsonDocument(memeDataResponse).toBinaryData());
         respSock->flush();
-        respSock->waitForBytesWritten(3000);
-        QThread::msleep(100);
     }
     else
         database.open();
@@ -361,8 +402,6 @@ void CSCommunication::getMemeData(const QString &memeName)
         qDebug()<<"POP VALUES FOR MEME " << memeName << " ::::::: " << QJsonDocument::fromJson(query.value(memePopIndex).toByteArray()).array();
         respSock->write(QJsonDocument(memeDataResponse).toBinaryData());
         respSock->flush();
-        respSock->waitForBytesWritten(3000);
-        QThread::msleep(100);
     }
     else
         database.open();
@@ -385,8 +424,6 @@ void CSCommunication::getMemesCategories()
         categoriesResponse.insert("categories", categoryArr);
         respSock->write(QJsonDocument(categoriesResponse).toBinaryData());
         respSock->flush();
-        respSock->waitForBytesWritten(3000);
-        QThread::msleep(100);
     }
     else
         database.open();
@@ -412,7 +449,7 @@ void CSCommunication::forceMeme(const QJsonObject &jsonObj)
         int weightIndex = rec.indexOf("weight");
         query.first();
         QSqlQuery forceQuery(database);
-        double feedbackRate = query.value(weightIndex).toDouble() * ( 1 + static_cast<double>(creativity) / 100 );
+        double feedbackRate = query.value(weightIndex).toDouble() + static_cast<double>(creativity) / 100;
         qDebug()<<"'''''''''''''''''''''''''''''''''";
         forceQuery.exec(QString("INSERT INTO user_memes (user_id, meme_id, startPopValue, creativity, feedbackRate) "
                                 "VALUES ('%1', '%2', '%3', '%4', '%5');")
