@@ -33,20 +33,17 @@ public:
     void getMemeDataForUser(const QString &memeName, const QString &userName);
     void getMemeData(const QString &memeName);
     void getMemesCategories();
+    void getUsersRating(const QString &userName);
     void forceMeme(const QJsonObject &jsonObj);
     void unforceMeme(const QString &memeName, const QString &userName);
     void increaseLikesQuantity(const QJsonObject &jsonObj);
 
     QString getName();
-    QString getPassword();
-    QString getUserToken();
 
     void connectToDatabase();
     void processingRequest(QJsonObject &jsonObj);
 
-    void setUserOffline();
-
-    QByteArray hashPassword(const QString &password);
+    void setUserStatus(bool status);
 private:
     QTcpSocket *respSock;
     QSqlDatabase database;
@@ -56,10 +53,8 @@ private:
     const int memesPopValuesCount = 12;
 signals:
     void nameAvailable(bool val);
-    void clientNameChanged();
 public slots:
     void onNameAvailable(bool val);
-    void onClientNameChanged();
 };
 
 #endif // CSCOMMUNICATION_H

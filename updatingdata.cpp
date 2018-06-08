@@ -8,6 +8,8 @@
 #include <QSqlRecord>
 #include <QSqlError>
 
+#include <QtMath>
+
 #include <QUrl>
 
 
@@ -112,7 +114,7 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
             int members = groups[groupIndex].toObject().value("members_count").toInt();
 
             unsigned int activity = views * likes * comments * reposts;
-            int popValue = ceil(activity * 1.0 / members);
+            int popValue = qCeil(activity * 1.0 / members);
 
             int memeId = query.value(rec.indexOf("id")).toInt();
             bool editedByUser = query.value(rec.indexOf("edited_by_user")).toBool();

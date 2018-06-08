@@ -16,7 +16,6 @@
 
 #include <iterator>
 
-#include <QCryptographicHash>
 
 CSCommunication::CSCommunication(QTcpSocket *tcpSocket, QObject *parent) : respSock(tcpSocket),
     QObject(parent)
@@ -25,12 +24,11 @@ CSCommunication::CSCommunication(QTcpSocket *tcpSocket, QObject *parent) : respS
     respSock->setSocketOption(QAbstractSocket::LowDelayOption, 1);
 
     connect(this, &CSCommunication::nameAvailable, this, &CSCommunication::onNameAvailable);
-    connect(this, &CSCommunication::clientNameChanged, this, &CSCommunication::onClientNameChanged);
 }
 
 CSCommunication::~CSCommunication()
 {
-    setUserOffline();
+    setUserStatus(false);
 }
 
 void CSCommunication::connectToDatabase(){
@@ -49,10 +47,6 @@ void CSCommunication::connectToDatabase(){
 void CSCommunication::processingRequest(QJsonObject &jsonObj){
     const QString requestType = jsonObj["requestType"].toString();
     qDebug()<<requestType;
-    if(jsonObj.contains("user_name") && clientName.isEmpty()){
-        clientName = jsonObj["user_name"].toString();
-        emit clientNameChanged();
-    }
 
     if(requestType == "checkName"){
         checkName(jsonObj["user_name"].toString());
@@ -62,6 +56,9 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     }
     else if(requestType == "signIn"){
         signIn(jsonObj);
+    }
+    else if(requestType == "signOut"){
+        setUserStatus(false);
     }
     else if(requestType == "getUserData"){
         getUserData(jsonObj);
@@ -78,6 +75,9 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     else if(requestType == "getMemesCategories"){
         getMemesCategories();
     }
+    else if(requestType == "getUsersRating"){
+        getUsersRating(jsonObj["user_name"].toString());
+    }
     else if(requestType == "forceMeme"){
         forceMeme(jsonObj);
     }
@@ -89,26 +89,16 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     }
 }
 
-void CSCommunication::setUserOffline()
+void CSCommunication::setUserStatus(bool status)
 {
     if(!clientName.isEmpty()){
         QSqlQuery query(database);
-        QString queryString = QString("UPDATE users SET online = 0 WHERE name = '%1';")
+        QString queryString = QString("UPDATE users SET online = '%1' WHERE name = '%2';")
+                                     .arg(status)
                                      .arg(clientName);
         if(!query.exec(queryString))
             database.open();
     }
-}
-
-QByteArray CSCommunication::hashPassword(const QString &password)
-{
-    QByteArray passwordHash = QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha224);
-
-    for(int i = 0; i < 4; i++){
-        passwordHash = QCryptographicHash::hash(passwordHash, QCryptographicHash::Sha224);
-    }
-
-    return passwordHash.toHex();
 }
 
 void CSCommunication::onNameAvailable(bool val){
@@ -119,16 +109,6 @@ void CSCommunication::onNameAvailable(bool val){
 
     respSock->write(QJsonDocument(jsonObj).toBinaryData());
     respSock->flush();
-}
-
-void CSCommunication::onClientNameChanged()
-{
-    QSqlQuery query(database);
-    QString queryString = QString("UPDATE users SET online = 1 WHERE name = '%1';")
-                                 .arg(clientName);
-    if(!query.exec(queryString))
-        database.open();
-
 }
 
 void CSCommunication::checkName(const QString &name){
@@ -154,34 +134,52 @@ void CSCommunication::checkName(const QString &name){
 void CSCommunication::signUp(QJsonObject &jsonObj){
     QSqlQuery query(database);
 
-    QByteArray passwordHash = hashPassword(jsonObj["user_password"].toString());
-
     query.prepare("INSERT INTO users (name, passwordHash, creativity, shekels) VALUES(:name, :passwordHash, 100, 100);");
     query.bindValue(":name", jsonObj["user_name"].toString());
-    query.bindValue(":passwordHash", passwordHash);
+    query.bindValue(":passwordHash", jsonObj["passwordHash"].toString());
     qDebug()<<"signUp(): \n"<<"name: "<<jsonObj["user_name"].toString()<<"\n"<<jsonObj["user_password"].toString()<<endl;
-    if(!query.exec())
+    QJsonObject responseObj;
+    responseObj.insert("responseType", "signUpResponse");
+    responseObj.insert("user_name", jsonObj["user_name"].toString());
+    if(query.exec()){
+        responseObj.insert("created", true);
+        clientName = jsonObj["user_name"].toString();
+        setUserStatus(true);
+    }
+    else{
+        responseObj.insert("created", false);
         database.open();
+    }
+    respSock->write(QJsonDocument(responseObj).toBinaryData());
+    respSock->flush();
 }
 
 void CSCommunication::signIn(QJsonObject &jsonObj)
 {
     QSqlQuery query(database);
 
-    QByteArray passwordHash = hashPassword(jsonObj["user_password"].toString());
     QString queryString = QString("SELECT passwordHash FROM users WHERE name = '%1';").arg(jsonObj["user_name"].toString());
     if(query.exec(queryString)){
+        QString passwordHash = jsonObj["passwordHash"].toString();
         QSqlRecord rec = query.record();
         query.first();
-        QByteArray userPasswordHash = query.value(rec.indexOf("passwordHash")).toByteArray();
+        QString userPasswordHash = query.value(rec.indexOf("passwordHash")).toString();
         QJsonObject responseObj;
         responseObj.insert("responseType", "signInResponse");
+        responseObj.insert("user_name", jsonObj["user_name"].toString());
         qDebug()<<passwordHash<<"   ::::::::   "<<userPasswordHash;
         if(userPasswordHash == passwordHash){
             qDebug()<<"password is correct!";
+            responseObj.insert("accessed", true);
+            clientName = jsonObj["user_name"].toString();
+            setUserStatus(true);
         }
-        else
+        else{
             qDebug()<<"password is wrong!";
+            responseObj.insert("accessed", false);
+        }
+        respSock->write(QJsonDocument(responseObj).toBinaryData());
+        respSock->flush();
     }
     else
         database.open();
@@ -423,6 +421,37 @@ void CSCommunication::getMemesCategories()
         categoriesResponse.insert("responseType", "getMemesCategoriesResponse");
         categoriesResponse.insert("categories", categoryArr);
         respSock->write(QJsonDocument(categoriesResponse).toBinaryData());
+        respSock->flush();
+    }
+    else
+        database.open();
+}
+
+void CSCommunication::getUsersRating(const QString &userName)
+{
+    QSqlQuery query(database);
+    if(query.exec("SELECT name, pop_value FROM users ORDER BY pop_value DESC;")){
+        qDebug()<<"JOPA";
+        QSqlRecord rec = query.record();
+        int nameIndex = rec.indexOf("name");
+        int popValueIndex = rec.indexOf("pop_value");
+        QJsonObject responseObj;
+        responseObj.insert("responseType", "getUsersRatingResponse");
+        QVariantList usersList;
+        int rating = 1;
+        while(query.next()){
+            QVariantMap userMap;
+            userMap.insert("rating", rating);
+            userMap.insert("user_name", query.value(nameIndex).toString());
+            userMap.insert("pop_value", query.value(popValueIndex).toInt());
+            if(userName == userMap["user_name"]){
+                responseObj.insert("user_rating", rating);
+            }
+            ++rating;
+            usersList << userMap;
+        }
+        responseObj.insert("usersList", QJsonArray::fromVariantList(usersList));
+        respSock->write(QJsonDocument(responseObj).toBinaryData());
         respSock->flush();
     }
     else
