@@ -30,6 +30,7 @@ public:
     void getUserData(const QJsonObject &jsonObj);
 //    void getMemeListOfUser(const QJsonObject &jsonObj);
     void getMemeListWithCategory(const QJsonObject &jsonObj);
+    void getAdList(const QJsonObject &jsonObj);
     void getMemeDataForUser(const QString &memeName, const QString &userName);
     void getMemeData(const QString &memeName);
     void getMemesCategories();
@@ -37,6 +38,7 @@ public:
     void forceMeme(const QJsonObject &jsonObj);
     void unforceMeme(const QString &memeName, const QString &userName);
     void increaseLikesQuantity(const QJsonObject &jsonObj);
+    void rewardUserWithShekels(const QString &userName, const int &shekels);
 
     QString getName();
 

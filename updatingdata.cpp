@@ -17,10 +17,10 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     mngr(new QNetworkAccessManager()), timer(new QTimer()),
     creativityTimer(new QTimer())
 {
+    connectToDatabase();
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
-    connectToDatabase();
 
     qDebug()<<"UpdatingData constructor";
 }

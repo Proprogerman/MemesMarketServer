@@ -72,6 +72,9 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     else if(requestType == "getMemeListWithCategory"){
         getMemeListWithCategory(jsonObj);
     }
+    else if(requestType == "getAdList"){
+        getAdList(jsonObj);
+    }
     else if(requestType == "getMemesCategories"){
         getMemesCategories();
     }
@@ -349,6 +352,72 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
         database.open();
 }
 
+void CSCommunication::getAdList(const QJsonObject &jsonObj)
+{
+    QSqlQuery query(database);
+    QString userName = jsonObj.value("user_name").toString();
+    QString queryString = QString("SELECT ads.name,ads.reputation,offer,discontented,pop_value,ads.image from ads "
+                                  "INNER JOIN reputation_discontented ON reputation_discontented.reputation = ads.reputation "
+                                  "INNER JOIN users ON users.name = '%1';")
+                                  .arg(userName);
+    if(query.exec(queryString)){
+        QSqlRecord rec = query.record();
+        qDebug()<<"query record:"<<rec;
+        int adNameIndex = rec.indexOf("name");
+        int reputationIndex = rec.indexOf("reputation");
+        int offerIndex = rec.indexOf("budget");
+        int discontentedIndex = rec.indexOf("discontented");
+        int popValueIndex = rec.indexOf("pop_value");
+        int adImageUrlIndex = rec.indexOf("image");
+
+        QVariantList adList;
+        QVector<QJsonObject> adImageVector;
+
+        QVariantList adsWithImages = jsonObj.value("adsWithImages").toArray().toVariantList();
+
+        while(query.next()){
+            QVariantMap adObj;
+            adObj.insert("adName", query.value(adNameIndex).toString());
+            adObj.insert("reputation", query.value(reputationIndex).toString());
+            adObj.insert("discontented", query.value(discontentedIndex).toInt());
+
+            int profit = query.value(offerIndex).toInt();                // предложение варьируется в зависимости от ранга
+            adObj.insert("profit", profit);
+
+            if(!adsWithImages.contains(query.value(adNameIndex).toString())){
+                    QImage adImage;
+                    QJsonObject adImageObj;
+                    adImage.load(query.value(adImageUrlIndex).toString(), "PNG");
+                    QByteArray byteArr;
+                    QBuffer buff(&byteArr);
+                    buff.open(QIODevice::WriteOnly);
+                    QImage resizedImage = adImage.scaled(200, 200, Qt::KeepAspectRatio);
+                    resizedImage.save(&buff, "PNG");
+                    auto encoded = buff.data().toBase64();
+                    adObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
+                    adImageObj.insert("responseType", "adImageResponse");
+                    adImageObj.insert("adName", query.value(adNameIndex).toString());
+                    adImageObj.insert("imageName",QUrl(query.value(adImageUrlIndex).toString()).fileName());
+                    adImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
+                    adImageVector.append(adImageObj);
+            }
+            adList << adObj;
+            adObj.clear();
+        }
+        QJsonObject jsonAdList;
+        jsonAdList.insert("responseType", "getAdListResponse");
+        jsonAdList.insert("adList", QJsonArray::fromVariantList(adList));
+        respSock->write(QJsonDocument(jsonAdList).toBinaryData());
+        respSock->flush();
+        for(int i = 0; i < adImageVector.size(); i++){
+            respSock->write(QJsonDocument(adImageVector[i]).toBinaryData());
+            respSock->flush();
+        }
+    }
+    else
+        database.open();
+}
+
 void CSCommunication::getMemeDataForUser(const QString &memeName, const QString &userName)
 {
     qDebug()<<"MEME_NAME" << memeName;
@@ -543,6 +612,19 @@ void CSCommunication::increaseLikesQuantity(const QJsonObject &jsonObj)
     }
     else
         database.open();
+}
+
+void CSCommunication::rewardUserWithShekels(const QString &userName, const int &shekels)
+{
+    QSqlQuery query(database);
+    QString queryString = QString("UPDATE users SET shekels = shekels + '%1' WHERE name = '%2';")
+            .arg(shekels)
+            .arg(userName);
+
+    if(!query.exec(queryString)){
+        database.open();
+        rewardUserWithShekels(userName, shekels);
+    }
 }
 
 
