@@ -20,7 +20,7 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     connectToDatabase();
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
-    connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
+//    connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
 
     qDebug()<<"UpdatingData constructor";
 }
@@ -166,11 +166,6 @@ void UpdatingData::updateUsersPopValues(){
         while(namesQuery.next()){
             QString name = namesQuery.value(0).toString();
             QSqlQuery updateQuery(database);
-//            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, weight, startPopValue, pop_value FROM memes "
-//                            "INNER JOIN user_memes ON memes.id = meme_id "
-//                            "INNER JOIN category_weight ON memes.category = category_weight.category "
-//                            "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
-//                            .arg(name));
             updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, feedbackRate, startPopValue, pop_value, "
                                      "user_memes.creativity FROM memes "
                                      "INNER JOIN user_memes ON memes.id = meme_id "

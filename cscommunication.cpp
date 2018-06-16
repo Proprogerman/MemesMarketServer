@@ -32,7 +32,7 @@ CSCommunication::~CSCommunication()
 }
 
 void CSCommunication::connectToDatabase(){
-    database = QSqlDatabase::addDatabase("QMYSQL");
+    database = QSqlDatabase::addDatabase("QMYSQL", "CscommunicationConnection" + QString::number(respSock->socketDescriptor()));
     database.setHostName("127.0.0.1");
     database.setDatabaseName("appschema");
     database.setPort(3306);
@@ -86,6 +86,9 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     }
     else if(requestType == "increaseLikesQuantity"){
         increaseLikesQuantity(jsonObj);
+    }
+    else if(requestType == "acceptAd"){
+        acceptAd(jsonObj);
     }
     else if(requestType == "unforceMeme"){
         unforceMeme(jsonObj["meme_name"].toString(), jsonObj["user_name"].toString());
@@ -365,7 +368,7 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
         qDebug()<<"query record:"<<rec;
         int adNameIndex = rec.indexOf("name");
         int reputationIndex = rec.indexOf("reputation");
-        int offerIndex = rec.indexOf("budget");
+        int offerIndex = rec.indexOf("offer");
         int discontentedIndex = rec.indexOf("discontented");
         int popValueIndex = rec.indexOf("pop_value");
         int adImageUrlIndex = rec.indexOf("image");
@@ -381,7 +384,7 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
             adObj.insert("reputation", query.value(reputationIndex).toString());
             adObj.insert("discontented", query.value(discontentedIndex).toInt());
 
-            int profit = query.value(offerIndex).toInt();                // предложение варьируется в зависимости от ранга
+            int profit = qFloor(query.value(offerIndex).toDouble() / 100 * query.value(popValueIndex).toDouble());
             adObj.insert("profit", profit);
 
             if(!adsWithImages.contains(query.value(adNameIndex).toString())){
@@ -397,7 +400,7 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
                     adObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
                     adImageObj.insert("responseType", "adImageResponse");
                     adImageObj.insert("adName", query.value(adNameIndex).toString());
-                    adImageObj.insert("imageName",QUrl(query.value(adImageUrlIndex).toString()).fileName());
+                    adImageObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
                     adImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
                     adImageVector.append(adImageObj);
             }
@@ -407,6 +410,7 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
         QJsonObject jsonAdList;
         jsonAdList.insert("responseType", "getAdListResponse");
         jsonAdList.insert("adList", QJsonArray::fromVariantList(adList));
+        qDebug()<<QJsonArray::fromVariantList(adList);
         respSock->write(QJsonDocument(jsonAdList).toBinaryData());
         respSock->flush();
         for(int i = 0; i < adImageVector.size(); i++){
@@ -567,6 +571,39 @@ void CSCommunication::forceMeme(const QJsonObject &jsonObj)
     }
     else
         database.open();
+}
+
+void CSCommunication::acceptAd(const QJsonObject &jsonObj)
+{
+    QSqlQuery query(database);
+    QString queryString = QString("SELECT ads.id AS ad_id, users.id AS user_id, pop_value FROM ads "
+                                  "INNER JOIN users WHERE ads.name = '%1' AND users.name = '%2';")
+                          .arg(jsonObj["adName"].toString())
+                          .arg(jsonObj["user_name"].toString());
+    if(query.exec(queryString)){
+        query.first();
+        QSqlRecord rec = query.record();
+        int adIdIndex = rec.indexOf("ad_id");
+        int userIdIndex = rec.indexOf("user_id");
+        int popValueIndex = rec.indexOf("pop_value");
+
+        int discontented = qFloor(query.value(popValueIndex).toDouble() * (jsonObj["adDiscontented"].toDouble() / 100));
+        QSqlQuery acceptQuery(database);
+        QString acceptQueryString = QString("INSERT INTO user_ad (user_id, ad_id) VALUES('%1','%2');")
+                                    .arg(query.value(userIdIndex).toInt())
+                                    .arg(query.value(adIdIndex).toInt());
+        if(acceptQuery.exec(acceptQueryString)){
+            QSqlQuery shekelsPopQuery(database);
+            QString shekelsPopQueryString = QString("UPDATE users SET shekels = shekels + '%1', pop_value = "
+                                                    "IF(pop_value >= '%2', pop_value - '%2', 0) "
+                                                    "WHERE name = '%3';")
+                                            .arg(jsonObj["adProfit"].toInt())
+                                            .arg(discontented)
+                                            .arg(jsonObj["user_name"].toString());
+            if(shekelsPopQuery.exec(shekelsPopQueryString))
+                qDebug()<<"РЕКЛАМА ПРИНЯТА";
+        }
+    }
 }
 
 void CSCommunication::unforceMeme(const QString &memeName, const QString &userName)

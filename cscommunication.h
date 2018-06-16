@@ -36,6 +36,7 @@ public:
     void getMemesCategories();
     void getUsersRating(const QString &userName);
     void forceMeme(const QJsonObject &jsonObj);
+    void acceptAd(const QJsonObject &jsonObj);
     void unforceMeme(const QString &memeName, const QString &userName);
     void increaseLikesQuantity(const QJsonObject &jsonObj);
     void rewardUserWithShekels(const QString &userName, const int &shekels);
@@ -55,6 +56,7 @@ private:
     const int memesPopValuesCount = 12;
 signals:
     void nameAvailable(bool val);
+    void adAccepted();
 public slots:
     void onNameAvailable(bool val);
 };
