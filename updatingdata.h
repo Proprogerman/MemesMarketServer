@@ -25,6 +25,7 @@ public:
     void updateUsersPopValues();
     void updateUsersCreativity();
     void updateUsersShekels();
+    void updateUserAdTime();
 private:
     QNetworkAccessManager *mngr;
     QTimer *timer;

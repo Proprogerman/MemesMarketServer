@@ -26,9 +26,7 @@ public:
     void checkName(const QString &name);
     void signUp(QJsonObject &jsonObj);
     void signIn(QJsonObject &jsonObj);
-//    void getUserData(const QString &userName);
     void getUserData(const QJsonObject &jsonObj);
-//    void getMemeListOfUser(const QJsonObject &jsonObj);
     void getMemeListWithCategory(const QJsonObject &jsonObj);
     void getAdList(const QJsonObject &jsonObj);
     void getMemeDataForUser(const QString &memeName, const QString &userName);

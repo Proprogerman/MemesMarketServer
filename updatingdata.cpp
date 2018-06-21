@@ -12,6 +12,8 @@
 
 #include <QUrl>
 
+#include <QDateTime>
+
 
 UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     mngr(new QNetworkAccessManager()), timer(new QTimer()),
@@ -20,7 +22,7 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     connectToDatabase();
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
-//    connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersShekels(); });
+    connect(timer, &QTimer::timeout, [this](){ updateUserAdTime(); });
 
     qDebug()<<"UpdatingData constructor";
 }
@@ -250,6 +252,29 @@ void UpdatingData::updateUsersShekels()
             updateQuery.exec(QString("UPDATE users SET shekels = shekels + '%1' WHERE name = '%2' AND online = 1;")
                                     .arg(shekelsIncrement)
                                     .arg(name));
+        }
+    }
+    else
+        database.open();
+}
+
+void UpdatingData::updateUserAdTime()
+{
+    QSqlQuery userAdQuery(database);
+    if(userAdQuery.exec("SELECT user_id, ad_id, unavailableUntil FROM user_ad;")){
+        QSqlRecord rec = userAdQuery.record();
+        int userIdIndex = rec.indexOf("user_id");
+        int adIdIndex = rec.indexOf("ad_id");
+        int unavailableUntilIndex = rec.indexOf("unavailableUntil");
+        while(userAdQuery.next()){
+            QDateTime dateTimeOfUserAd = userAdQuery.value(unavailableUntilIndex).toDateTime();
+            if(dateTimeOfUserAd <= QDateTime::currentDateTime()){
+                QSqlQuery deleteQuery(database);
+                QString deleteQueryString = QString("DELETE FROM user_ad WHERE user_id = '%1' AND ad_id = '%2';")
+                                                    .arg(userAdQuery.value(userIdIndex).toInt())
+                                                    .arg(userAdQuery.value(adIdIndex).toInt());
+                deleteQuery.exec(deleteQueryString);
+            }
         }
     }
     else
