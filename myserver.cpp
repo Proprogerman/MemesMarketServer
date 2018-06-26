@@ -6,7 +6,7 @@ MyServer::MyServer(QObject* parent):
     QTcpServer(parent), upd(new UpdatingData())
 {
     threadPool = new QThreadPool(this);
-    threadPool->reserveThread();
+
     if(listen(QHostAddress::Any, 1234)){
         qDebug()<<"Listening...";
     }
@@ -16,9 +16,15 @@ MyServer::MyServer(QObject* parent):
     threadPool->setMaxThreadCount(10);
 }
 
+MyServer::~MyServer(){
+    delete threadPool;
+    delete upd;
+}
+
 void MyServer::incomingConnection(qintptr handle)
 {
     ServerRunnable *runnable = new ServerRunnable();
+    runnable->setAutoDelete(true);
     runnable->setDescriptor(handle);
     threadPool->start(runnable);
 }

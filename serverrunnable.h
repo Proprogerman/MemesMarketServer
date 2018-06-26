@@ -3,12 +3,13 @@
 
 #include "cscommunication.h"
 
-#include<QRunnable>
-#include<QTcpSocket>
-#include<QDebug>
-#include<QTime>
-#include<QEventLoop>
-#include<QThread>
+#include <QRunnable>
+#include <QTcpSocket>
+#include <QDebug>
+#include <QTime>
+#include <QEventLoop>
+#include <QThread>
+#include <QByteArray>
 
 class ServerRunnable : public QObject, public QRunnable
 {
@@ -18,6 +19,7 @@ public:
 
     void setDescriptor(qintptr desc);
     void run();
+    quint32 arrayToInt(QByteArray dataSize);
 private:
     CSCommunication* m_comm;
     qintptr m_descriptor;

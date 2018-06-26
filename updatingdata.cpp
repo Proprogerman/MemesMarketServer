@@ -23,8 +23,13 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
     connect(timer, &QTimer::timeout, [this](){ updateUserAdTime(); });
+    connect(timer, &QTimer::timeout, [this](){ updateMemeLoyalty(); });
+}
 
-    qDebug()<<"UpdatingData constructor";
+UpdatingData::~UpdatingData(){
+    delete mngr;
+    delete timer;
+    delete creativityTimer;
 }
 
 void UpdatingData::connectToDatabase(){
@@ -74,7 +79,6 @@ void UpdatingData::vkApi(){
 void UpdatingData::onTimerTriggered(){
     QSqlQuery query(database);
     if(query.exec("SELECT id, vk_id FROM memes;")){
-
         QSqlRecord rec = query.record();
         int idIndex = rec.indexOf("id");
         int vk_idIndex = rec.indexOf("vk_id");
@@ -137,7 +141,6 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
                 updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
                                  .arg(QString(doc.toJson(QJsonDocument::Compact)))
                                  .arg(memeId));
-                qDebug()<<"LAST QUERY: "<<updateQuery.lastQuery();
             }
             else{
                 QSqlQuery updateQuery;
@@ -150,7 +153,7 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
     }
     else
         database.open();
-    qDebug()<<"_________________________________________";
+    reply->deleteLater();
 }
 
 void UpdatingData::setPostsCount(QNetworkReply *reply)
@@ -160,6 +163,7 @@ void UpdatingData::setPostsCount(QNetworkReply *reply)
     int postCount = obj.value("count").toInt();
     int ownerId = obj.value("items").toArray().first().toObject().value("owner_id").toInt();
     postsCount.insert(ownerId, postCount);
+    reply->deleteLater();
 }
 
 void UpdatingData::updateUsersPopValues(){
@@ -168,7 +172,7 @@ void UpdatingData::updateUsersPopValues(){
         while(namesQuery.next()){
             QString name = namesQuery.value(0).toString();
             QSqlQuery updateQuery(database);
-            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, feedbackRate, startPopValue, pop_value, "
+            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, loyalty, startPopValue, pop_value, "
                                      "user_memes.creativity FROM memes "
                                      "INNER JOIN user_memes ON memes.id = meme_id "
                                      "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
@@ -176,8 +180,7 @@ void UpdatingData::updateUsersPopValues(){
             QSqlRecord rec = updateQuery.record();
 
             int memePopValuesIndex = rec.indexOf("pop_values");
-//            int weightIndex = rec.indexOf("weight");
-//            int feedbackRateIndex = rec.indexOf("feedbackRate");
+            int loyaltyIndex = rec.indexOf("loyalty");
             int userPopValueIndex = rec.indexOf("pop_value");
             int startPopValueIndex = rec.indexOf("startPopValue");
             int creativityIndex = rec.indexOf("creativity");
@@ -185,21 +188,18 @@ void UpdatingData::updateUsersPopValues(){
             int popValueChange = 0;
             while(updateQuery.next()){
                 QJsonArray popArr = QJsonDocument::fromJson(updateQuery.value(memePopValuesIndex).toByteArray()).array();
-//                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(weightIndex).toDouble());
                 int currentValue = popArr.last().toInt();
                 int startPopValue = updateQuery.value(startPopValueIndex).toInt();
-//                double feedbackrate = updateQuery.value(feedbackRateIndex).toDouble();
+                double loyalty = updateQuery.value(loyaltyIndex).toDouble() / 100;
                 double creativityRate = updateQuery.value(creativityIndex).toDouble() / 100;
-                popValueChange += static_cast<int>(currentValue * (1 + creativityRate) - startPopValue);
-//                popValueChange += static_cast<int>(popArr.last().toInt() * updateQuery.value(feedbackRateIndex).toDouble());
+                popValueChange += static_cast<int>((currentValue * (1 + creativityRate) - startPopValue) * loyalty);
             }
             if(updateQuery.size() != 0){
                 QSqlQuery query(database);
                 updateQuery.last();
                 int userPopValue = updateQuery.value(userPopValueIndex).toInt();
-                //qDebug()<<"userPopValue: "<<updateQuery.value(userPopValueIndex).toInt();
                 if(userPopValue + popValueChange > 0){
-                    query.exec(QString("UPDATE users SET pop_value = pop_value + %1 WHERE name = '%2';")
+                    query.exec(QString("UPDATE users SET pop_value = pop_value + '%1' WHERE name = '%2';")
                                .arg(popValueChange)
                                .arg(name));
                 }
@@ -220,7 +220,7 @@ void UpdatingData::updateUsersCreativity()
             QSqlRecord rec = creativityQuery.record();
             QString name = creativityQuery.value(rec.indexOf("name")).toString();
             int creativity = creativityQuery.value(rec.indexOf("creativity")).toInt();
-            int creativityIncrement = 20;                                       // может быть индивидуальным
+            int creativityIncrement = 20;
             QSqlQuery updateQuery(database);
             if(creativity + creativityIncrement <= 100){
                 updateQuery.exec(QString("UPDATE users SET creativity = creativity + '%1' WHERE name = '%2';")
@@ -231,27 +231,6 @@ void UpdatingData::updateUsersCreativity()
                 updateQuery.exec(QString("UPDATE users SET creativity = 100 WHERE name = '%1';")
                                  .arg(name));
             }
-        }
-    }
-    else
-        database.open();
-}
-
-void UpdatingData::updateUsersShekels()
-{
-    QSqlQuery shekelsQuery(database);
-    if(shekelsQuery.exec("SELECT name, shekels FROM users;")){
-        QSqlRecord rec = shekelsQuery.record();
-        int nameIndex = rec.indexOf("name");
-        int shekelsIndex = rec.indexOf("shekels");
-        while(shekelsQuery.next()){
-            QString name = shekelsQuery.value(nameIndex).toString();
-            int shekels = shekelsQuery.value(shekelsIndex).toInt();
-            int shekelsIncrement = 50;                                   // может быть индивидуальным
-            QSqlQuery updateQuery(database);
-            updateQuery.exec(QString("UPDATE users SET shekels = shekels + '%1' WHERE name = '%2' AND online = 1;")
-                                    .arg(shekelsIncrement)
-                                    .arg(name));
         }
     }
     else
@@ -275,6 +254,33 @@ void UpdatingData::updateUserAdTime()
                                                     .arg(userAdQuery.value(adIdIndex).toInt());
                 deleteQuery.exec(deleteQueryString);
             }
+        }
+    }
+    else
+        database.open();
+}
+
+void UpdatingData::updateMemeLoyalty()
+{
+    QSqlQuery memesQuery(database);
+    if(memesQuery.exec("SELECT name, endowedCreativity, investedShekels FROM memes;")){
+        QSqlRecord rec = memesQuery.record();
+        int nameIndex = rec.indexOf("name");
+        int creativityIndex = rec.indexOf("endowedCreativity");
+        int shekelsIndex = rec.indexOf("investedShekels");
+        while(memesQuery.next()){
+            QSqlQuery updateQuery(database);
+            int contribution = memesQuery.value(creativityIndex).toDouble()
+                    - memesQuery.value(shekelsIndex).toInt() / 10;
+            int loyalty = 100 + contribution;
+            if(loyalty < 0)
+                loyalty = 0;
+            else if(loyalty > 100)
+                loyalty = 100;
+            QString updateQueryString = QString("UPDATE memes SET loyalty = '%1' WHERE name = '%2';")
+                                                .arg(loyalty)
+                                                .arg(memesQuery.value(nameIndex).toString());
+            updateQuery.exec(updateQueryString);
         }
     }
     else
