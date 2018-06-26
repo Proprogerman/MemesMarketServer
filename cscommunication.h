@@ -29,8 +29,7 @@ public:
     void getUserData(const QJsonObject &jsonObj);
     void getMemeListWithCategory(const QJsonObject &jsonObj);
     void getAdList(const QJsonObject &jsonObj);
-    void getMemeDataForUser(const QString &memeName, const QString &userName);
-    void getMemeData(const QString &memeName);
+    void getMemeData(const QString &memeName, const QString &userName);
     void getMemesCategories();
     void getUsersRating(const QString &userName);
     void forceMeme(const QJsonObject &jsonObj);
@@ -45,6 +44,9 @@ public:
     void processingRequest(QJsonObject &jsonObj);
 
     void setUserStatus(bool status);
+
+    bool writeData(const QByteArray &data);
+    QByteArray intToArray(const quint32 &dataSize);
 private:
     QTcpSocket *respSock;
     QSqlDatabase database;

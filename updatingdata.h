@@ -18,14 +18,14 @@ class UpdatingData : public QObject
     Q_OBJECT
 public:
     explicit UpdatingData(QObject *parent = nullptr);
+    ~UpdatingData();
 
     void connectToDatabase();
-    //void vkApi(QString postId);
     void vkApi();
     void updateUsersPopValues();
     void updateUsersCreativity();
-    void updateUsersShekels();
     void updateUserAdTime();
+    void updateMemeLoyalty();
 private:
     QNetworkAccessManager *mngr;
     QTimer *timer;
@@ -43,7 +43,6 @@ public slots:
     void onTimerTriggered();
     void updateMemesPopValues(QNetworkReply *reply);
     void setPostsCount(QNetworkReply *reply);
-//    void getVkResponse(QNetworkReply *reply);
 };
 
 #endif // UPDATINGDATA_H
