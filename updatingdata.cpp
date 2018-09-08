@@ -19,6 +19,7 @@ UpdatingData::UpdatingData(QObject *parent) : QObject(parent),
     mngr(new QNetworkAccessManager()), timer(new QTimer()),
     creativityTimer(new QTimer())
 {
+    setAuthData();
     connectToDatabase();
     connect(timer, &QTimer::timeout, this, &UpdatingData::onTimerTriggered);
     connect(creativityTimer, &QTimer::timeout, [this](){ updateUsersCreativity(); });
@@ -51,32 +52,40 @@ void UpdatingData::connectToDatabase(){
 void UpdatingData::vkApi(){
     QMapIterator<int, QString> memesIter(memesMap);
     QString postsRequestString;
-    QString wallRequestString;
-    postsRequestString.append("https://api.vk.com/method/wall.getById?posts=");
+    int postsCounter = 0;
     while(memesIter.hasNext()){
         memesIter.next();
-        wallRequestString.append("https://api.vk.com/method/wall.get?owner_id=");
+        postsCounter++;
+        if(postsRequestString.isEmpty())
+            postsRequestString = "https://api.vk.com/method/wall.getById?posts=";
         postsRequestString.append(memesIter.value());
         int idSize = 0;
-        for(int i = 0; memesIter.value().at(i) != '_'; i++){
-            idSize = i;
+        while(idSize < memesIter.value().size() - 1){
+            if(memesIter.value().at(idSize) == '_')
+                break;
+            ++idSize;
         }
-        wallRequestString.append(memesIter.value().mid(0, idSize + 1));
-        wallRequestString.append("&access_token=094b40d2094b40d2094b40d29e0917b1eb0094b094b40d2501aa9b9710314fdf82f8efd"
-                                 "&count=1&v=5.74");
-        QNetworkReply *wallReply = mngr->get(QNetworkRequest(QUrl(wallRequestString)));
-        connect(wallReply, &QNetworkReply::finished, [=](){setPostsCount(wallReply);});
-        if(memesIter.hasNext())
+        if(memesIter.hasNext() && postsCounter < 100)
             postsRequestString.append(",");
-    }
-    postsRequestString.append("&access_token=094b40d2094b40d2094b40d29e0917b1eb0094b094b40d2501aa9b9710314fdf82f8efd"
-                              "&extended=1&fields=members_count&v=5.74");
 
-    QNetworkReply *postsReply = mngr->get(QNetworkRequest(QUrl(postsRequestString)));
-    connect(postsReply, &QNetworkReply::finished, [=](){updateMemesPopValues(postsReply);});
+        if(!memesIter.hasNext() || postsCounter == 100){
+            postsRequestString.append("&extended=1&fields=members_count&v=5.80&access_token=");
+            postsRequestString.append(accessToken);
+            QNetworkReply *postsReply = mngr->get(QNetworkRequest(QUrl(postsRequestString)));
+            connect(postsReply, &QNetworkReply::finished, [=](){updateMemesPopValues(postsReply);});
+            postsCounter = 0;
+            postsRequestString.clear();
+        }
+    }
 }
 
 void UpdatingData::onTimerTriggered(){
+    QString checkMemesRequestString = "https://api.vk.com/method/photos.get?owner_id=-170377182&v=5.80&album_id=255910742&"
+                                      "access_token=";
+    checkMemesRequestString.append(accessToken);
+    QNetworkReply *checkMemesReply = mngr->get(QNetworkRequest(QUrl(checkMemesRequestString)));
+    connect(checkMemesReply, &QNetworkReply::finished, [=](){checkMemesFromHub(checkMemesReply);});
+
     QSqlQuery query(database);
     if(query.exec("SELECT id, vk_id FROM memes;")){
         QSqlRecord rec = query.record();
@@ -92,6 +101,33 @@ void UpdatingData::onTimerTriggered(){
     }
     else
         database.open();
+}
+
+void UpdatingData::checkMemesFromHub(QNetworkReply *reply)
+{
+    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+    QJsonObject obj = doc.object()["response"].toObject();
+    QJsonArray items = obj["items"].toArray();
+    for(int i = 0; i < items.size(); i++){
+        QJsonObject item = items[i].toObject();
+        QJsonObject memeData = QJsonDocument::fromJson(item["text"].toString().simplified().toUtf8()).object();
+        QSqlQuery query(database);
+        QString checkMemeInDatabaseString = QString("SELECT id FROM memes WHERE name = '%1';")
+                                                    .arg(memeData["name"].toString());
+        query.exec(checkMemeInDatabaseString);
+        if(!query.size()){
+            QJsonArray images = item["sizes"].toArray();
+            QSqlQuery insertMemeQuery(database);
+            QString insertMemeQueryString = QString("INSERT INTO memes (name,image,pop_values,vk_id,category) "
+                                              "VALUES('%1','%2','[0]','%3','%4');")
+                                              .arg(memeData["name"].toString())
+                                              .arg(images[images.size() - 1].toObject()["url"].toString())
+                                              .arg(memeData["vk_id"].toString())
+                                              .arg(memeData["category"].toString());
+            insertMemeQuery.exec(insertMemeQueryString);
+        }
+    }
+    reply->deleteLater();
 }
 
 void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
@@ -153,16 +189,6 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
     }
     else
         database.open();
-    reply->deleteLater();
-}
-
-void UpdatingData::setPostsCount(QNetworkReply *reply)
-{
-    QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-    QJsonObject obj = doc.object().value("response").toObject();
-    int postCount = obj.value("count").toInt();
-    int ownerId = obj.value("items").toArray().first().toObject().value("owner_id").toInt();
-    postsCount.insert(ownerId, postCount);
     reply->deleteLater();
 }
 
@@ -286,3 +312,14 @@ void UpdatingData::updateMemeLoyalty()
     else
         database.open();
 }
+
+void UpdatingData::setAuthData()
+{
+    QFile fil(":/authData.json");
+    fil.open(QFile::ReadOnly | QIODevice::Text);
+    QString val = fil.readAll();
+    fil.close();
+    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object();
+    accessToken = obj["access_token"].toString();
+}
+

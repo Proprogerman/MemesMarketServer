@@ -12,6 +12,7 @@
 #include <QMap>
 #include <QVector>
 #include <QMapIterator>
+#include <QFile>
 
 class UpdatingData : public QObject
 {
@@ -26,14 +27,15 @@ public:
     void updateUsersCreativity();
     void updateUserAdTime();
     void updateMemeLoyalty();
+    void setAuthData();
 private:
     QNetworkAccessManager *mngr;
     QTimer *timer;
     QTimer *creativityTimer;
     QSqlDatabase database;
     QMap<int, QString> memesMap;
-    QMap<int, int> postsCount;
     bool isConnected = false;
+    QString accessToken;
 
     const int memesPopValuesCount = 12;
 signals:
@@ -41,8 +43,8 @@ signals:
 
 public slots:
     void onTimerTriggered();
+    void checkMemesFromHub(QNetworkReply *reply);
     void updateMemesPopValues(QNetworkReply *reply);
-    void setPostsCount(QNetworkReply *reply);
 };
 
 #endif // UPDATINGDATA_H

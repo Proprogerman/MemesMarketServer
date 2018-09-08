@@ -278,22 +278,9 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
                     memeObj.insert("loyalty", memesQuery.value(loyaltyIndex).toInt());
                     memeObj.insert("category", memesQuery.value(categoryIndex).toString());
                     memeObj.insert("creativity", memesQuery.value(creativityIndex).toInt());
-                    memeObj.insert("imageName",QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName());
-                    if(!localImages.contains(QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName())){
-                            QImage memeImage;
-                            QJsonObject memeImageObj;
-                            memeImage.load(memesQuery.value(memeImageUrlIndex).toString(), "JPG");
-                            QByteArray byteArr;
-                            QBuffer buff(&byteArr);
-                            buff.open(QIODevice::WriteOnly);
-                            memeImage.save(&buff, "JPG");
-                            auto encoded = buff.data().toBase64();
-                            memeImageObj.insert("responseType", "memeImageResponse");
-                            memeImageObj.insert("memeName", memesQuery.value(memeNameIndex).toString());
-                            memeImageObj.insert("imageName",QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName());
-                            memeImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
-                            memeImageVector.append(memeImageObj);
-                    }
+                    memeObj.insert("imageName", QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName());
+                    if(!localImages.contains(memeObj["imageName"]))
+                        memeObj.insert("imageUrl", memesQuery.value(memeImageUrlIndex).toString());
                     memeList << memeObj;
                     memeObj.clear();
                 }
@@ -340,16 +327,15 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
         while(query.next()){
             QVariantMap memeObj;
             memeObj.insert("memeName", query.value(memeNameIndex).toString());
-            memeObj.insert("imageName",QUrl(query.value(memeImageUrlIndex).toString()).fileName());
             memeObj.insert("popValues", QJsonDocument::fromJson(query.value(memePopIndex).toByteArray()).array());
             memeObj.insert("loyalty", query.value(loyaltyIndex).toInt());
             QSqlQuery forceCheckQuery(database);
             QString forceCheckQueryString = QString("SELECT startPopValue, user_memes.creativity FROM user_memes "
-                                              "INNER JOIN users ON users.id = user_id "
-                                              "INNER JOIN memes ON memes.id = meme_id "
-                                              "WHERE users.name = '%1' AND memes.name = '%2';")
-                                              .arg(userName)
-                                              .arg(memeObj["memeName"].toString());
+                                                    "INNER JOIN users ON users.id = user_id "
+                                                    "INNER JOIN memes ON memes.id = meme_id "
+                                                    "WHERE users.name = '%1' AND memes.name = '%2';")
+                                                    .arg(userName)
+                                                    .arg(memeObj["memeName"].toString());
             forceCheckQuery.exec(forceCheckQueryString);
             QSqlRecord forceCheckRec = forceCheckQuery.record();
             int startPopValueIndex = forceCheckRec.indexOf("startPopValue");
@@ -359,23 +345,10 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
             memeObj.insert("forced", forceCheckQuery.size() != 0);
             memeObj.insert("startPopValue", forceCheckQuery.size() != 0 ? forceCheckQuery.value(startPopValueIndex).toInt() : -1);
             memeObj.insert("creativity", forceCheckQuery.size() != 0 ? forceCheckQuery.value(creativityIndex).toInt() : 0);
+            memeObj.insert("imageName", QUrl(query.value(memeImageUrlIndex).toString()).fileName());
 
-            if(!localImages.contains(QUrl(query.value(memeImageUrlIndex).toString()).fileName())){
-                    qDebug()<<"does not contain";
-                    QImage memeImage;
-                    QJsonObject memeImageObj;
-                    memeImage.load(query.value(memeImageUrlIndex).toString(), "JPG");
-                    QByteArray byteArr;
-                    QBuffer buff(&byteArr);
-                    buff.open(QIODevice::WriteOnly);
-                    memeImage.save(&buff, "JPG");
-                    auto encoded = buff.data().toBase64();
-                    memeImageObj.insert("responseType", "memeImageResponse");
-                    memeImageObj.insert("memeName", query.value(memeNameIndex).toString());
-                    memeImageObj.insert("imageName",QUrl(query.value(memeImageUrlIndex).toString()).fileName());
-                    memeImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
-                    memeImageVector.append(memeImageObj);
-            }
+            if(!localImages.contains(memeObj["imageName"]))
+                memeObj.insert("imageUrl", query.value(memeImageUrlIndex).toString());
             memeList << memeObj;
             memeObj.clear();
         }
@@ -414,7 +387,7 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
         QVariantList adList;
         QVector<QJsonObject> adImageVector;
 
-        QVariantList adsWithImages = jsonObj.value("adsWithImages").toArray().toVariantList();
+        QVariantList adsWithImages = jsonObj.value("localImages").toArray().toVariantList();
 
         while(query.next()){
             QVariantMap adObj;
@@ -444,19 +417,21 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
             adObj.insert("profit", profit);
 
             if(!adsWithImages.contains(QUrl(query.value(adImageUrlIndex).toString()).fileName())){
-                    QImage adImage;
-                    QJsonObject adImageObj;
-                    adImage.load(query.value(adImageUrlIndex).toString(), "PNG");
-                    QByteArray byteArr;
-                    QBuffer buff(&byteArr);
-                    buff.open(QIODevice::WriteOnly);
-                    adImage.save(&buff, "PNG");
-                    auto encoded = buff.data().toBase64();
-                    adImageObj.insert("responseType", "adImageResponse");
-                    adImageObj.insert("adName", query.value(adNameIndex).toString());
-                    adImageObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
-                    adImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
-                    adImageVector.append(adImageObj);
+//                adObj.insert("imageUrl", query.value(adImageUrlIndex).toString());
+//                adObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
+                QImage adImage;
+                QJsonObject adImageObj;
+                adImage.load(query.value(adImageUrlIndex).toString(), "PNG");
+                QByteArray byteArr;
+                QBuffer buff(&byteArr);
+                buff.open(QIODevice::WriteOnly);
+                adImage.save(&buff, "PNG");
+                auto encoded = buff.data().toBase64();
+                adImageObj.insert("responseType", "adImageResponse");
+                adImageObj.insert("adName", query.value(adNameIndex).toString());
+                adImageObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
+                adImageObj.insert("imageData", QJsonValue(QString::fromLatin1(encoded)));
+                adImageVector.append(adImageObj);
             }
             adList << adObj;
             adObj.clear();
