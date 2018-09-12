@@ -1,7 +1,13 @@
 #include "serverrunnable.h"
 #include "cscommunication.h"
 
+
 ServerRunnable::ServerRunnable(QObject* parent): QObject(parent)
+{
+
+}
+
+ServerRunnable::~ServerRunnable()
 {
 
 }
@@ -35,7 +41,6 @@ quint32 ServerRunnable::arrayToInt(QByteArray dataSize)
     return temp;
 }
 
-
 void ServerRunnable::onReadyRead()
 {
     while(m_socket->bytesAvailable()){
@@ -57,7 +62,6 @@ void ServerRunnable::onReadyRead()
 
 void ServerRunnable::onDisconnected()
 {
-    qDebug()<<"onDisconnected()";
-    m_eventLoop->exit();
     delete m_comm;
+    m_eventLoop->exit();
 }

@@ -7,7 +7,13 @@ MyServer::MyServer(QObject* parent):
 {
     threadPool = new QThreadPool(this);
 
-    if(listen(QHostAddress::Any, 1234)){
+    QFile fil(":/authData.json");
+    fil.open(QFile::ReadOnly | QIODevice::Text);
+    QString val = fil.readAll();
+    fil.close();
+    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object().value("Server").toObject();
+
+    if(listen(QHostAddress::Any, obj["port"].toString().toInt())){
         qDebug()<<"Listening...";
     }
     else{

@@ -31,12 +31,18 @@ CSCommunication::~CSCommunication()
 }
 
 void CSCommunication::connectToDatabase(){
+    QFile fil(":/authData.json");
+    fil.open(QFile::ReadOnly | QIODevice::Text);
+    QString val = fil.readAll();
+    fil.close();
+    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object().value("Database").toObject();
+
     database = QSqlDatabase::addDatabase("QMYSQL", "CscommunicationConnection" + QString::number(respSock->socketDescriptor()));
     database.setHostName("127.0.0.1");
-    database.setDatabaseName("appschema");
+    database.setDatabaseName(obj["name"].toString());
     database.setPort(3306);
     database.setUserName("root");
-    database.setPassword("root");
+    database.setPassword(obj["password"].toString());
     if(!database.open())
         qDebug()<<"database is not open!";
     else
@@ -45,6 +51,8 @@ void CSCommunication::connectToDatabase(){
 
 void CSCommunication::processingRequest(QJsonObject &jsonObj){
     const QString requestType = jsonObj["requestType"].toString();
+
+    setName(jsonObj["user_name"].toString());
 
     if(requestType == "checkName"){
         checkName(jsonObj["user_name"].toString());
@@ -91,6 +99,7 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
     else if(requestType == "rewardUserWithShekels"){
         rewardUserWithShekels(jsonObj["user_name"].toString(), jsonObj["shekels"].toInt());
     }
+
 }
 
 void CSCommunication::setUserStatus(bool status)
@@ -99,7 +108,7 @@ void CSCommunication::setUserStatus(bool status)
         QSqlQuery query(database);
         QString queryString = QString("UPDATE users SET online = '%1' WHERE name = '%2';")
                                      .arg(status)
-                                     .arg(clientName);
+                                     .arg(getName());
         if(!query.exec(queryString))
             database.open();
     }
@@ -131,18 +140,19 @@ void CSCommunication::checkName(const QString &name){
 
     if(query.exec()){
         if(query.size() == 0)
-            nameAvailableResponse(true);
+            nameAvailableResponse(true, name);
         else
-            nameAvailableResponse(false);
+            nameAvailableResponse(false, name);
     }
     else
         database.open();
 }
 
-void CSCommunication::nameAvailableResponse(const bool &val){
+void CSCommunication::nameAvailableResponse(const bool &val, const QString &name){
     QJsonObject jsonObj{
         { "responseType", "checkNameResponse" },
-        { "nameAvailable", val }
+        { "nameAvailable", val },
+        { "name", name }
     };
 
     writeData(QJsonDocument(jsonObj).toBinaryData());
@@ -159,7 +169,6 @@ void CSCommunication::signUp(QJsonObject &jsonObj){
     responseObj.insert("user_name", jsonObj["user_name"].toString());
     if(query.exec()){
         responseObj.insert("created", true);
-        clientName = jsonObj["user_name"].toString();
         setUserStatus(true);
     }
     else{
@@ -184,7 +193,6 @@ void CSCommunication::signIn(QJsonObject &jsonObj)
         responseObj.insert("user_name", jsonObj["user_name"].toString());
         if(userPasswordHash == passwordHash){
             responseObj.insert("accessed", true);
-            clientName = jsonObj["user_name"].toString();
             setUserStatus(true);
         }
         else
@@ -278,9 +286,22 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
                     memeObj.insert("loyalty", memesQuery.value(loyaltyIndex).toInt());
                     memeObj.insert("category", memesQuery.value(categoryIndex).toString());
                     memeObj.insert("creativity", memesQuery.value(creativityIndex).toInt());
-                    memeObj.insert("imageName", QUrl(memesQuery.value(memeImageUrlIndex).toString()).fileName());
+
+                    QJsonArray sizesArr = QJsonDocument::fromJson(memesQuery.value(memeImageUrlIndex).toByteArray()).array();
+                    int s = 0;
+                    int sideDiff = abs(sizesArr[0].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt());
+                    for(int i = 1; i < sizesArr.size(); i++){
+                        if(abs(sizesArr[i].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt()) < sideDiff){
+                            sideDiff = abs(sizesArr[i].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt());
+                            s = i;
+                        }
+                    }
+
+                    memeObj.insert("imageName", QUrl(sizesArr[s].toObject()["url"].toString()).fileName());
+
                     if(!localImages.contains(memeObj["imageName"]))
-                        memeObj.insert("imageUrl", memesQuery.value(memeImageUrlIndex).toString());
+                        memeObj.insert("imageUrl", sizesArr[s].toObject()["url"].toString());
+
                     memeList << memeObj;
                     memeObj.clear();
                 }
@@ -345,13 +366,25 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
             memeObj.insert("forced", forceCheckQuery.size() != 0);
             memeObj.insert("startPopValue", forceCheckQuery.size() != 0 ? forceCheckQuery.value(startPopValueIndex).toInt() : -1);
             memeObj.insert("creativity", forceCheckQuery.size() != 0 ? forceCheckQuery.value(creativityIndex).toInt() : 0);
-            memeObj.insert("imageName", QUrl(query.value(memeImageUrlIndex).toString()).fileName());
+
+            QJsonArray sizesArr = QJsonDocument::fromJson(query.value(memeImageUrlIndex).toByteArray()).array();
+            int s = 0;
+            int sideDiff = abs(sizesArr[0].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt());
+            for(int i = 1; i < sizesArr.size(); i++){
+                if(abs(sizesArr[i].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt()) < sideDiff){
+                    sideDiff = abs(sizesArr[i].toObject()["width"].toInt() - jsonObj["screenWidth"].toString().toInt());
+                    s = i;
+                }
+            }
+
+            memeObj.insert("imageName", QUrl(sizesArr[s].toObject()["url"].toString()).fileName());
 
             if(!localImages.contains(memeObj["imageName"]))
-                memeObj.insert("imageUrl", query.value(memeImageUrlIndex).toString());
+                memeObj.insert("imageUrl", sizesArr[s].toObject()["url"].toString());
             memeList << memeObj;
             memeObj.clear();
         }
+
         QJsonObject jsonMemeList;
         jsonMemeList.insert("responseType", "getMemeListWithCategoryResponse");
         jsonMemeList.insert("category", category);
@@ -414,11 +447,10 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
             }
 
             int profit = qFloor(query.value(offerIndex).toDouble() / 100 * query.value(popValueIndex).toDouble());
-            adObj.insert("profit", profit);
+            int maxProfit = 500;
+            adObj.insert("profit", profit > maxProfit ? maxProfit : profit);
 
             if(!adsWithImages.contains(QUrl(query.value(adImageUrlIndex).toString()).fileName())){
-//                adObj.insert("imageUrl", query.value(adImageUrlIndex).toString());
-//                adObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
                 QImage adImage;
                 QJsonObject adImageObj;
                 adImage.load(query.value(adImageUrlIndex).toString(), "PNG");
@@ -440,7 +472,6 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
         jsonAdList.insert("responseType", "getAdListResponse");
         jsonAdList.insert("adList", QJsonArray::fromVariantList(adList));
         writeData(QJsonDocument(jsonAdList).toBinaryData());
-        respSock->waitForBytesWritten(3000);
         for(int i = 0; i < adImageVector.size(); i++){
             writeData(QJsonDocument(adImageVector[i]).toBinaryData());
         }
@@ -458,7 +489,6 @@ void CSCommunication::getMemeData(const QString &memeName, const QString &userNa
     if(query.exec(queryString)){
         QSqlRecord rec = query.record();
         int memePopIndex = rec.indexOf("pop_values");
-        int memeImageUrlIndex = rec.indexOf("image");
         int loyaltyIndex = rec.indexOf("loyalty");
         int memeCategoryIndex = rec.indexOf("category");
 
@@ -470,7 +500,6 @@ void CSCommunication::getMemeData(const QString &memeName, const QString &userNa
         memeDataResponse.insert("popValues", QJsonDocument::fromJson(query.value(memePopIndex).toByteArray()).array());
         memeDataResponse.insert("loyalty", query.value(loyaltyIndex).toInt());
         memeDataResponse.insert("category", query.value(memeCategoryIndex).toString());
-        memeDataResponse.insert("imageName", QUrl(query.value(memeImageUrlIndex).toString()).fileName());
 
         QSqlQuery forceCheckQuery(database);
         QString forceCheckQueryString = QString("SELECT startPopValue, user_memes.creativity FROM user_memes "
@@ -675,6 +704,16 @@ void CSCommunication::rewardUserWithShekels(const QString &userName, const int &
         database.open();
         rewardUserWithShekels(userName, shekels);
     }
+}
+
+QString CSCommunication::getName()
+{
+    return clientName;
+}
+
+void CSCommunication::setName(const QString &userName)
+{
+    clientName = userName;
 }
 
 

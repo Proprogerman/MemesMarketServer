@@ -16,6 +16,7 @@ class ServerRunnable : public QObject, public QRunnable
     Q_OBJECT
 public:
     explicit ServerRunnable(QObject* parent = 0);
+    ~ServerRunnable();
 
     void setDescriptor(qintptr desc);
     void run();

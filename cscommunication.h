@@ -24,7 +24,7 @@ public:
     ~CSCommunication();
 
     void checkName(const QString &name);
-    void nameAvailableResponse(const bool &val);
+    void nameAvailableResponse(const bool &val, const QString &name);
     void signUp(QJsonObject &jsonObj);
     void signIn(QJsonObject &jsonObj);
     void getUserData(const QJsonObject &jsonObj);
@@ -40,6 +40,7 @@ public:
     void rewardUserWithShekels(const QString &userName, const int &shekels);
 
     QString getName();
+    void setName(const QString &userName);
 
     void connectToDatabase();
     void processingRequest(QJsonObject &jsonObj);

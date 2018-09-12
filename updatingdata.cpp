@@ -34,12 +34,18 @@ UpdatingData::~UpdatingData(){
 }
 
 void UpdatingData::connectToDatabase(){
+    QFile fil(":/authData.json");
+    fil.open(QFile::ReadOnly | QIODevice::Text);
+    QString val = fil.readAll();
+    fil.close();
+    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object().value("Database").toObject();
+
     database = QSqlDatabase::addDatabase("QMYSQL");
     database.setHostName("127.0.0.1");
-    database.setDatabaseName("appschema");
+    database.setDatabaseName(obj["name"].toString());
     database.setPort(3306);
     database.setUserName("root");
-    database.setPassword("root");
+    database.setPassword(obj["password"].toString());
     if(!database.open())
         qDebug()<<"database is not open!";
     else{
@@ -108,24 +114,45 @@ void UpdatingData::checkMemesFromHub(QNetworkReply *reply)
     QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
     QJsonObject obj = doc.object()["response"].toObject();
     QJsonArray items = obj["items"].toArray();
+    QVector<QString> namesFromHub;
     for(int i = 0; i < items.size(); i++){
         QJsonObject item = items[i].toObject();
         QJsonObject memeData = QJsonDocument::fromJson(item["text"].toString().simplified().toUtf8()).object();
-        QSqlQuery query(database);
-        QString checkMemeInDatabaseString = QString("SELECT id FROM memes WHERE name = '%1';")
-                                                    .arg(memeData["name"].toString());
-        query.exec(checkMemeInDatabaseString);
-        if(!query.size()){
-            QJsonArray images = item["sizes"].toArray();
-            QSqlQuery insertMemeQuery(database);
-            QString insertMemeQueryString = QString("INSERT INTO memes (name,image,pop_values,vk_id,category) "
-                                              "VALUES('%1','%2','[0]','%3','%4');")
-                                              .arg(memeData["name"].toString())
-                                              .arg(images[images.size() - 1].toObject()["url"].toString())
-                                              .arg(memeData["vk_id"].toString())
-                                              .arg(memeData["category"].toString());
-            insertMemeQuery.exec(insertMemeQueryString);
+        QJsonDocument doc;
+        doc.setArray(item["sizes"].toArray());
+        QSqlQuery insertMemeQuery(database);
+        QString insertMemeQueryString = QString("INSERT INTO memes (name, image, pop_values, vk_id, category) "
+                                                "VALUES('%1','%2', '[0]', '%3', '%4') "
+                                                "ON DUPLICATE KEY UPDATE image = '%2', vk_id = '%3', category = '%4';")
+                                                .arg(memeData["name"].toString())
+                                                .arg(QString(doc.toJson(QJsonDocument::Compact)))
+                                                .arg(memeData["vk_id"].toString())
+                                                .arg(memeData["category"].toString());
+        insertMemeQuery.exec(insertMemeQueryString);
+        namesFromHub.append(memeData["name"].toString());
+    }
+    QSqlQuery checkMemesCountQuery(database);
+    checkMemesCountQuery.exec("SELECT id FROM memes;");
+    if(items.size() < checkMemesCountQuery.size()){
+        QString getIdQueryString = "SELECT id FROM memes WHERE name NOT IN (";
+        for(int i = 0; i < namesFromHub.size(); i++){
+            getIdQueryString.append("'" + namesFromHub[i] + "'" + (i < namesFromHub.size() - 1 ? "," : ");"));
         }
+        QSqlQuery getIdQuery(database);
+        getIdQuery.exec(getIdQueryString);
+        QString deleteMemesQueryString = "DELETE FROM memes WHERE id IN (";
+        QString deleteUserMemesQueryString = "DELETE FROM user_memes WHERE meme_id IN (";
+        for(int i = 0; i < getIdQuery.size(); i++){
+            getIdQuery.next();
+            deleteMemesQueryString.append("'" + QString::number(getIdQuery.value(0).toInt()) +
+                                          "'" + (i < getIdQuery.size() - 1 ? "," : ");"));
+            deleteUserMemesQueryString.append("'" + QString::number(getIdQuery.value(0).toInt()) +
+                                              "'" + (i < getIdQuery.size() - 1 ? "," : ");"));
+        }
+        QSqlQuery deleteUserMemesQuery(database);
+        deleteUserMemesQuery.exec(deleteUserMemesQueryString);
+        QSqlQuery deleteMemesQuery(database);
+        deleteMemesQuery.exec(deleteMemesQueryString);
     }
     reply->deleteLater();
 }
@@ -147,15 +174,14 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
             int comments = item.value("comments").toObject().value("count").toInt();
             int views = item.value("views").toObject().value("count").toInt();
             int ownerId = item.value("owner_id").toInt();
-            int groupIndex = 0;
 
+            unsigned members;
             for(int i = 0; i < groups.size(); i++){
-                if(groups[i].toObject().value("owner_id").toInt() == ownerId)
-                    groupIndex = i;
+                if(-groups[i].toObject().value("id").toInt() == ownerId)
+                    members = groups[i].toObject().value("members_count").toInt();
             }
-            int members = groups[groupIndex].toObject().value("members_count").toInt();
 
-            unsigned int activity = views * likes * comments * reposts;
+            unsigned activity = views * likes * comments * reposts;
             int popValue = qCeil(activity * 1.0 / members);
 
             int memeId = query.value(rec.indexOf("id")).toInt();
@@ -174,7 +200,7 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
                 QSqlQuery updateQuery;
                 QJsonDocument doc;
                 doc.setArray(popArr);
-                updateQuery.exec(QString("UPDATE memes SET pop_values='%1' WHERE id='%2';")
+                updateQuery.exec(QString("UPDATE memes SET pop_values = '%1' WHERE id = '%2';")
                                  .arg(QString(doc.toJson(QJsonDocument::Compact)))
                                  .arg(memeId));
             }
@@ -319,7 +345,7 @@ void UpdatingData::setAuthData()
     fil.open(QFile::ReadOnly | QIODevice::Text);
     QString val = fil.readAll();
     fil.close();
-    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object();
+    QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object().value("Vk").toObject();
     accessToken = obj["access_token"].toString();
 }
 
