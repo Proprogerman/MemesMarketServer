@@ -29,6 +29,7 @@ void ServerRunnable::run()
     connect(m_socket, &QTcpSocket::disconnected, this, &ServerRunnable::onDisconnected, Qt::DirectConnection);
 
     m_eventLoop->exec();
+    delete m_comm;
     delete m_socket;
     delete m_eventLoop;
 }
@@ -62,6 +63,5 @@ void ServerRunnable::onReadyRead()
 
 void ServerRunnable::onDisconnected()
 {
-    delete m_comm;
     m_eventLoop->exit();
 }

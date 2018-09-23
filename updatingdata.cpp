@@ -121,14 +121,14 @@ void UpdatingData::checkMemesFromHub(QNetworkReply *reply)
         QJsonDocument doc;
         doc.setArray(item["sizes"].toArray());
         QSqlQuery insertMemeQuery(database);
-        QString insertMemeQueryString = QString("INSERT INTO memes (name, image, pop_values, vk_id, category) "
-                                                "VALUES('%1','%2', '[0]', '%3', '%4') "
-                                                "ON DUPLICATE KEY UPDATE image = '%2', vk_id = '%3', category = '%4';")
-                                                .arg(memeData["name"].toString())
-                                                .arg(QString(doc.toJson(QJsonDocument::Compact)))
-                                                .arg(memeData["vk_id"].toString())
-                                                .arg(memeData["category"].toString());
-        insertMemeQuery.exec(insertMemeQueryString);
+        insertMemeQuery.prepare("INSERT INTO memes (name, image, pop_values, vk_id, category) "
+                                "VALUES(:name, :image, '[0]', :vk_id, :category) "
+                                "ON DUPLICATE KEY UPDATE image = :image, vk_id = :vk_id, category = :category;");
+        insertMemeQuery.bindValue(":name", memeData["name"].toString());
+        insertMemeQuery.bindValue(":image", QString(doc.toJson(QJsonDocument::Compact)));
+        insertMemeQuery.bindValue(":vk_id", memeData["vk_id"].toString());
+        insertMemeQuery.bindValue(":category", memeData["category"].toString());
+        insertMemeQuery.exec();
         namesFromHub.append(memeData["name"].toString());
     }
     QSqlQuery checkMemesCountQuery(database);
@@ -144,10 +144,10 @@ void UpdatingData::checkMemesFromHub(QNetworkReply *reply)
         QString deleteUserMemesQueryString = "DELETE FROM user_memes WHERE meme_id IN (";
         for(int i = 0; i < getIdQuery.size(); i++){
             getIdQuery.next();
-            deleteMemesQueryString.append("'" + QString::number(getIdQuery.value(0).toInt()) +
-                                          "'" + (i < getIdQuery.size() - 1 ? "," : ");"));
             deleteUserMemesQueryString.append("'" + QString::number(getIdQuery.value(0).toInt()) +
                                               "'" + (i < getIdQuery.size() - 1 ? "," : ");"));
+            deleteMemesQueryString.append("'" + QString::number(getIdQuery.value(0).toInt()) +
+                                          "'" + (i < getIdQuery.size() - 1 ? "," : ");"));
         }
         QSqlQuery deleteUserMemesQuery(database);
         deleteUserMemesQuery.exec(deleteUserMemesQueryString);
@@ -167,6 +167,8 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
         QJsonArray items = obj.value("items").toArray();
         QJsonArray groups = obj.value("groups").toArray();
 
+        QVector<QString> updatedMemes;
+
         for(int i = 0; i < items.size(); i++){
             QJsonObject item = items[i].toObject();
             int likes = item.value("likes").toObject().value("count").toInt();
@@ -182,9 +184,11 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
             }
 
             unsigned activity = views * likes * comments * reposts;
-            int popValue = qCeil(activity * 1.0 / members);
+            int randPart = qrand() % 3 - 1;
+            int popValue = qCeil(activity * 1.0 / members) + randPart;
+            popValue = popValue < 0 ? 0 : popValue;
 
-            int memeId = query.value(rec.indexOf("id")).toInt();
+            QString postId = QString::number(item["owner_id"].toInt()) + '_' + QString::number(item["id"].toInt());
             bool editedByUser = query.value(rec.indexOf("edited_by_user")).toBool();
             if(!editedByUser){
                 QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
@@ -200,14 +204,16 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
                 QSqlQuery updateQuery;
                 QJsonDocument doc;
                 doc.setArray(popArr);
-                updateQuery.exec(QString("UPDATE memes SET pop_values = '%1' WHERE id = '%2';")
-                                 .arg(QString(doc.toJson(QJsonDocument::Compact)))
-                                 .arg(memeId));
+                updateQuery.prepare("UPDATE memes SET pop_values = :popValues WHERE vk_id = :postId;");
+                updateQuery.bindValue(":popValues", QString(doc.toJson(QJsonDocument::Compact)));
+                updateQuery.bindValue(":postId", postId);
+                updateQuery.exec();
             }
             else{
                 QSqlQuery updateQuery;
-                updateQuery.exec(QString("UPDATE memes SET edited_by_user = 0 WHERE id = '%1';")
-                                 .arg(memeId));
+                updateQuery.prepare("UPDATE memes SET edited_by_user = 0 WHERE vk_id = :postId;");
+                updateQuery.bindValue(":memeId", postId);
+                updateQuery.exec();
             }
             query.next();
         }
@@ -224,13 +230,14 @@ void UpdatingData::updateUsersPopValues(){
         while(namesQuery.next()){
             QString name = namesQuery.value(0).toString();
             QSqlQuery updateQuery(database);
-            updateQuery.exec(QString("SELECT users.name, memes.name, pop_values, loyalty, startPopValue, pop_value, "
-                                     "user_memes.creativity FROM memes "
-                                     "INNER JOIN user_memes ON memes.id = meme_id "
-                                     "INNER JOIN users ON users.id = user_id WHERE users.name = '%1';")
-                                     .arg(name));
-            QSqlRecord rec = updateQuery.record();
+            updateQuery.prepare("SELECT users.name, memes.name, pop_values, loyalty, startPopValue, pop_value, "
+                                "user_memes.creativity FROM memes "
+                                "INNER JOIN user_memes ON memes.id = meme_id "
+                                "INNER JOIN users ON users.id = user_id WHERE users.name = :userName;");
+            updateQuery.bindValue(":userName", name);
+            updateQuery.exec();
 
+            QSqlRecord rec = updateQuery.record();
             int memePopValuesIndex = rec.indexOf("pop_values");
             int loyaltyIndex = rec.indexOf("loyalty");
             int userPopValueIndex = rec.indexOf("pop_value");
@@ -251,12 +258,15 @@ void UpdatingData::updateUsersPopValues(){
                 updateQuery.last();
                 int userPopValue = updateQuery.value(userPopValueIndex).toInt();
                 if(userPopValue + popValueChange > 0){
-                    query.exec(QString("UPDATE users SET pop_value = pop_value + '%1' WHERE name = '%2';")
-                               .arg(popValueChange)
-                               .arg(name));
+                    query.prepare("UPDATE users SET pop_value = pop_value + :popValueChange WHERE name = :userName;");
+                    query.bindValue(":popValueChange", popValueChange);
+                    query.bindValue(":userName", name);
+                    query.exec();
                 }
                 else
-                    query.exec(QString("UPDATE users SET pop_value = 0 WHERE name = '%1';").arg(name));
+                    query.prepare("UPDATE users SET pop_value = 0 WHERE name = :userName;");
+                    query.bindValue(":userName", name);
+                    query.exec();
             }
         }
     }
@@ -275,13 +285,15 @@ void UpdatingData::updateUsersCreativity()
             int creativityIncrement = 20;
             QSqlQuery updateQuery(database);
             if(creativity + creativityIncrement <= 100){
-                updateQuery.exec(QString("UPDATE users SET creativity = creativity + '%1' WHERE name = '%2';")
-                                 .arg(creativityIncrement)
-                                 .arg(name));
+                updateQuery.prepare("UPDATE users SET creativity = creativity + :creativityIncrement WHERE name = :userName;");
+                updateQuery.bindValue(":creativityIncrement", creativityIncrement);
+                updateQuery.bindValue(":userName", name);
+                updateQuery.exec();
             }
             else{
-                updateQuery.exec(QString("UPDATE users SET creativity = 100 WHERE name = '%1';")
-                                 .arg(name));
+                updateQuery.prepare("UPDATE users SET creativity = 100 WHERE name = :userName;");
+                updateQuery.bindValue(":userName", name);
+                updateQuery.exec();
             }
         }
     }
@@ -301,10 +313,10 @@ void UpdatingData::updateUserAdTime()
             QDateTime dateTimeOfUserAd = userAdQuery.value(unavailableUntilIndex).toDateTime();
             if(dateTimeOfUserAd <= QDateTime::currentDateTime()){
                 QSqlQuery deleteQuery(database);
-                QString deleteQueryString = QString("DELETE FROM user_ad WHERE user_id = '%1' AND ad_id = '%2';")
-                                                    .arg(userAdQuery.value(userIdIndex).toInt())
-                                                    .arg(userAdQuery.value(adIdIndex).toInt());
-                deleteQuery.exec(deleteQueryString);
+                deleteQuery.prepare("DELETE FROM user_ad WHERE user_id = :userId AND ad_id = :adId;");
+                deleteQuery.bindValue(":userId", userAdQuery.value(userIdIndex).toInt());
+                deleteQuery.bindValue(":adId", userAdQuery.value(adIdIndex).toInt());
+                deleteQuery.exec();
             }
         }
     }
@@ -329,10 +341,10 @@ void UpdatingData::updateMemeLoyalty()
                 loyalty = 0;
             else if(loyalty > 100)
                 loyalty = 100;
-            QString updateQueryString = QString("UPDATE memes SET loyalty = '%1' WHERE name = '%2';")
-                                                .arg(loyalty)
-                                                .arg(memesQuery.value(nameIndex).toString());
-            updateQuery.exec(updateQueryString);
+            updateQuery.prepare("UPDATE memes SET loyalty = :loyalty WHERE name = :memeName;");
+            updateQuery.bindValue(":loyalty", loyalty);
+            updateQuery.bindValue(":memeName", memesQuery.value(nameIndex).toString());
+            updateQuery.exec();
         }
     }
     else

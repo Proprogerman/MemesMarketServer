@@ -104,12 +104,13 @@ void CSCommunication::processingRequest(QJsonObject &jsonObj){
 
 void CSCommunication::setUserStatus(bool status)
 {
-    if(!clientName.isEmpty()){
+    if(!getName().isEmpty()){
         QSqlQuery query(database);
-        QString queryString = QString("UPDATE users SET online = '%1' WHERE name = '%2';")
-                                     .arg(status)
-                                     .arg(getName());
-        if(!query.exec(queryString))
+        query.prepare("UPDATE users SET online = :online WHERE name = :name;");
+        query.bindValue(":online", status);
+        query.bindValue(":name", getName());
+        query.exec();
+        if(!query.exec())
             database.open();
     }
 }
@@ -181,9 +182,9 @@ void CSCommunication::signUp(QJsonObject &jsonObj){
 void CSCommunication::signIn(QJsonObject &jsonObj)
 {
     QSqlQuery query(database);
-
-    QString queryString = QString("SELECT passwordHash FROM users WHERE name = '%1';").arg(jsonObj["user_name"].toString());
-    if(query.exec(queryString)){
+    query.prepare("SELECT passwordHash FROM users WHERE name = :name;");
+    query.bindValue(":name", jsonObj["user_name"].toString());
+    if(query.exec()){
         QString passwordHash = jsonObj["passwordHash"].toString();
         QSqlRecord rec = query.record();
         query.first();
@@ -208,21 +209,22 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
 {    
     QString userName = jsonObj["user_name"].toString();
     QSqlQuery userQuery(database);
-    QString userQueryString = QString( "SELECT pop_value, creativity, shekels FROM users WHERE name = '%1';")
-                                       .arg(userName);
+
+    userQuery.prepare("SELECT pop_value, creativity, shekels FROM users WHERE name = :name;");
+    userQuery.bindValue(":name", userName);
 
     QSqlQuery memesQuery(database);
-    QString memesQueryString = QString( "SELECT memes.name, memes.pop_values, startPopValue, loyalty, category, "
-                                        "user_memes.creativity, memes.image FROM users "
-                                        "INNER JOIN user_memes ON users.id = user_id "
-                                        "INNER JOIN memes ON meme_id = memes.id WHERE users.name = '%1';")
-                                        .arg(userName);
+    memesQuery.prepare( "SELECT memes.name, memes.pop_values, startPopValue, loyalty, category, "
+                        "user_memes.creativity, memes.image FROM users "
+                        "INNER JOIN user_memes ON users.id = user_id "
+                        "INNER JOIN memes ON meme_id = memes.id WHERE users.name = :name;");
+    memesQuery.bindValue(":name", userName);
 
     QJsonObject responseObj;
     QJsonObject userImageObj;
     responseObj.insert("responseType", "getUserDataResponse");
 
-    if(userQuery.exec(userQueryString)){
+    if(userQuery.exec()){
         QSqlRecord userRec = userQuery.record();
         int userPopValueIndex = userRec.indexOf("pop_value");
         int userCreativityIndex = userRec.indexOf("creativity");
@@ -261,7 +263,7 @@ void CSCommunication::getUserData(const QJsonObject &jsonObj)
         responseObj.insert("creativity", userQuery.value(userCreativityIndex).toInt());
         responseObj.insert("shekels", userQuery.value(userShekelsIndex).toInt());
 
-        if(memesQuery.exec(memesQueryString)){
+        if(memesQuery.exec()){
             if(memesQuery.size() > 0){
                 QSqlRecord rec = memesQuery.record();
                 int memeNameIndex = rec.indexOf("name");
@@ -330,10 +332,11 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
     QSqlQuery query(database);
     QString category = jsonObj.value("category").toString();
     QString userName = jsonObj.value("user_name").toString();
-    QString queryString = QString("SELECT name, image, pop_values, loyalty FROM memes "
-                                  "WHERE category = '%1';")
-                          .arg(category);
-    if(query.exec(queryString)){
+    query.prepare("SELECT name, image, pop_values, loyalty FROM memes "
+                  "WHERE category = :category;");
+    query.bindValue(":category", category);
+
+    if(query.exec()){
         QSqlRecord rec = query.record();
         int memeNameIndex = rec.indexOf("name");
         int memePopIndex = rec.indexOf("pop_values");
@@ -351,13 +354,13 @@ void CSCommunication::getMemeListWithCategory(const QJsonObject &jsonObj)
             memeObj.insert("popValues", QJsonDocument::fromJson(query.value(memePopIndex).toByteArray()).array());
             memeObj.insert("loyalty", query.value(loyaltyIndex).toInt());
             QSqlQuery forceCheckQuery(database);
-            QString forceCheckQueryString = QString("SELECT startPopValue, user_memes.creativity FROM user_memes "
-                                                    "INNER JOIN users ON users.id = user_id "
-                                                    "INNER JOIN memes ON memes.id = meme_id "
-                                                    "WHERE users.name = '%1' AND memes.name = '%2';")
-                                                    .arg(userName)
-                                                    .arg(memeObj["memeName"].toString());
-            forceCheckQuery.exec(forceCheckQueryString);
+            forceCheckQuery.prepare("SELECT startPopValue, user_memes.creativity FROM user_memes "
+                                    "INNER JOIN users ON users.id = user_id "
+                                    "INNER JOIN memes ON memes.id = meme_id "
+                                    "WHERE users.name = :userName AND memes.name = :memeName;");
+            forceCheckQuery.bindValue(":userName", userName);
+            forceCheckQuery.bindValue(":memeName", memeObj["memeName"].toString());
+            forceCheckQuery.exec();
             QSqlRecord forceCheckRec = forceCheckQuery.record();
             int startPopValueIndex = forceCheckRec.indexOf("startPopValue");
             int creativityIndex = forceCheckRec.indexOf("creativity");
@@ -402,15 +405,19 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
 {
     QSqlQuery query(database);
     QString userName = jsonObj.value("user_name").toString();
-    QString queryString = QString("SELECT users.id AS user_id,ads.id AS ad_id,ads.name,ads.reputation,offer,discontented,pop_value,ads.image from ads "
-                                  "INNER JOIN reputation_discontented ON reputation_discontented.reputation = ads.reputation "
-                                  "INNER JOIN users ON users.name = '%1';")
-                                  .arg(userName);
-    if(query.exec(queryString)){
+
+    query.prepare("SELECT users.id AS user_id, ads.id AS ad_id, ads.name, ads.en_name, ads.reputation, "
+                  "offer, discontented, pop_value, ads.image FROM ads "
+                  "INNER JOIN reputation_discontented ON reputation_discontented.reputation = ads.reputation "
+                  "INNER JOIN users ON users.name = :name;");
+    query.bindValue(":name", userName);
+
+    if(query.exec()){
         QSqlRecord rec = query.record();
         int userIdIndex = rec.indexOf("user_id");
         int adIdIndex = rec.indexOf("ad_id");
         int adNameIndex = rec.indexOf("name");
+        int adEnNameIndex = rec.indexOf("en_name");
         int reputationIndex = rec.indexOf("reputation");
         int offerIndex = rec.indexOf("offer");
         int discontentedIndex = rec.indexOf("discontented");
@@ -421,22 +428,23 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
         QVector<QJsonObject> adImageVector;
 
         QVariantList adsWithImages = jsonObj.value("localImages").toArray().toVariantList();
+        QString lang = jsonObj["lang"].toString();
 
         while(query.next()){
             QVariantMap adObj;
-            adObj.insert("adName", query.value(adNameIndex).toString());
+            adObj.insert("adName", query.value(lang == "ru" ? adNameIndex : adEnNameIndex).toString());
             adObj.insert("reputation", query.value(reputationIndex).toString());
             adObj.insert("discontented", query.value(discontentedIndex).toInt());
             adObj.insert("imageName", QUrl(query.value(adImageUrlIndex).toString()).fileName());
 
             QSqlQuery timeQuery(database);
-            QString timeQueryString = QString("SELECT unavailableUntil FROM user_ad WHERE user_id = '%1' AND ad_id = '%2';")
-                                      .arg(query.value(userIdIndex).toInt())
-                                      .arg(query.value(adIdIndex).toInt());
+            timeQuery.prepare("SELECT unavailableUntil FROM user_ad WHERE user_id = :userId AND ad_id = :adId;");
+            timeQuery.bindValue(":userId", QVariant(query.value(userIdIndex).toInt()));
+            timeQuery.bindValue(":adId", QVariant(query.value(adIdIndex).toInt()));
 
             QDateTime unavailableUntil;
 
-            timeQuery.exec(timeQueryString);
+            timeQuery.exec();
             timeQuery.first();
 
             if(timeQuery.size() == 0)
@@ -483,10 +491,11 @@ void CSCommunication::getAdList(const QJsonObject &jsonObj)
 void CSCommunication::getMemeData(const QString &memeName, const QString &userName)
 {
     QSqlQuery query(database);
-    QString queryString = QString("SELECT image, pop_values, loyalty, category FROM memes "
-                                  "WHERE name = '%1';")
-                                  .arg(memeName);
-    if(query.exec(queryString)){
+    query.prepare("SELECT image, pop_values, loyalty, category FROM memes "
+                  "WHERE name = :name;");
+    query.bindValue(":name", memeName);
+
+    if(query.exec()){
         QSqlRecord rec = query.record();
         int memePopIndex = rec.indexOf("pop_values");
         int loyaltyIndex = rec.indexOf("loyalty");
@@ -502,13 +511,14 @@ void CSCommunication::getMemeData(const QString &memeName, const QString &userNa
         memeDataResponse.insert("category", query.value(memeCategoryIndex).toString());
 
         QSqlQuery forceCheckQuery(database);
-        QString forceCheckQueryString = QString("SELECT startPopValue, user_memes.creativity FROM user_memes "
-                                          "INNER JOIN users ON users.id = user_id "
-                                          "INNER JOIN memes ON memes.id = meme_id "
-                                          "WHERE users.name = '%1' AND memes.name = '%2';")
-                                          .arg(userName)
-                                          .arg(memeName);
-        forceCheckQuery.exec(forceCheckQueryString);
+        forceCheckQuery.prepare("SELECT startPopValue, user_memes.creativity FROM user_memes "
+                                "INNER JOIN users ON users.id = user_id "
+                                "INNER JOIN memes ON memes.id = meme_id "
+                                "WHERE users.name = :userName AND memes.name = :memeName;");
+        forceCheckQuery.bindValue(":userName", userName);
+        forceCheckQuery.bindValue(":memeName", memeName);
+        forceCheckQuery.exec();
+
         QSqlRecord forceCheckRec = forceCheckQuery.record();
         int startPopValueIndex = forceCheckRec.indexOf("startPopValue");
         int creativityIndex = forceCheckRec.indexOf("creativity");
@@ -579,32 +589,38 @@ void CSCommunication::forceMeme(const QJsonObject &jsonObj)
     QString memeName = jsonObj.value("meme_name").toString();
     QString userName = jsonObj.value("user_name").toString();
     double creativity = jsonObj.value("creativity").toInt();
-    QString queryString = QString(  "SELECT users.id as user_id, memes.id as meme_id FROM users "
-                                    "INNER JOIN memes ON memes.name = '%1' "
-                                    "WHERE users.name = '%2';")
-                                    .arg(memeName)
-                                    .arg(userName);
-    if(query.exec(queryString)){
+    query.prepare("SELECT users.id as user_id, memes.id as meme_id FROM users "
+                  "INNER JOIN memes ON memes.name = :memeName "
+                  "WHERE users.name = :userName;");
+    query.bindValue(":memeName", memeName);
+    query.bindValue(":userName", userName);
+
+    if(query.exec()){
         QSqlRecord rec = query.record();
         int userIdIndex = rec.indexOf("user_id");
         int memeIdIndex = rec.indexOf("meme_id");
         query.first();
         QSqlQuery forceQuery(database);
-        forceQuery.exec(QString("INSERT INTO user_memes (user_id, meme_id, startPopValue, creativity) "
-                                "VALUES ('%1', '%2', '%3', '%4');")
-                                .arg(query.value(userIdIndex).toInt())
-                                .arg(query.value(memeIdIndex).toInt())
-                                .arg(jsonObj.value("startPopValue").toInt())
-                                .arg(creativity));
+        forceQuery.prepare("INSERT INTO user_memes (user_id, meme_id, startPopValue, creativity) "
+                           "VALUES (:userId, :memeId, :startPopValue, :creativity);");
+        forceQuery.bindValue(":userId", query.value(userIdIndex).toInt());
+        forceQuery.bindValue(":memeId", query.value(memeIdIndex).toInt());
+        forceQuery.bindValue(":startPopValue", jsonObj.value("startPopValue").toInt());
+        forceQuery.bindValue(":creativity", creativity);
+        forceQuery.exec();
+
         if(creativity > 0){
             QSqlQuery updateQuery(database);
-            updateQuery.exec(QString("UPDATE users SET creativity = creativity - '%1' WHERE name = '%2';")
-                                    .arg(creativity)
-                                    .arg(userName));
+            updateQuery.prepare("UPDATE users SET creativity = creativity - :creativity WHERE name = :userName;");
+            updateQuery.bindValue(":creativity", creativity);
+            updateQuery.bindValue(":userName", userName);
+            updateQuery.exec();
+
             updateQuery.clear();
-            updateQuery.exec(QString("UPDATE memes SET endowedCreativity = endowedCreativity + '%1' WHERE name = '%2';")
-                                    .arg(creativity)
-                                    .arg(memeName));
+            updateQuery.prepare("UPDATE memes SET endowedCreativity = endowedCreativity + :creativity WHERE name = :memeName;");
+            updateQuery.bindValue(":creativity", creativity);
+            updateQuery.bindValue(":memeName", memeName);
+            updateQuery.exec();
         }
     }
     else
@@ -614,11 +630,12 @@ void CSCommunication::forceMeme(const QJsonObject &jsonObj)
 void CSCommunication::acceptAd(const QJsonObject &jsonObj)
 {
     QSqlQuery query(database);
-    QString queryString = QString("SELECT ads.id AS ad_id, users.id AS user_id, pop_value FROM ads "
-                                  "INNER JOIN users WHERE ads.name = '%1' AND users.name = '%2';")
-                          .arg(jsonObj["adName"].toString())
-                          .arg(jsonObj["user_name"].toString());
-    if(query.exec(queryString)){
+    query.prepare("SELECT ads.id AS ad_id, users.id AS user_id, pop_value FROM ads "
+                  "INNER JOIN users WHERE ads.name = :adName AND users.name = :userName;");
+    query.bindValue(":adName", jsonObj["adName"].toString());
+    query.bindValue(":userName", jsonObj["user_name"].toString());
+
+    if(query.exec()){
         query.first();
         QSqlRecord rec = query.record();
         int adIdIndex = rec.indexOf("ad_id");
@@ -627,20 +644,20 @@ void CSCommunication::acceptAd(const QJsonObject &jsonObj)
 
         int discontented = qFloor(query.value(popValueIndex).toDouble() * (jsonObj["adDiscontented"].toDouble() / 100));
         QSqlQuery acceptQuery(database);
-        QString acceptQueryString = QString("INSERT INTO user_ad (user_id, ad_id, unavailableUntil) VALUES('%1','%2','%3');")
-                                    .arg(query.value(userIdIndex).toInt())
-                                    .arg(query.value(adIdIndex).toInt())
-                                    .arg(QDateTime::currentDateTime().addSecs(1800).toString("yyyy-MM-dd hh:mm:ss"));
+        acceptQuery.prepare("INSERT INTO user_ad (user_id, ad_id, unavailableUntil) VALUES(:userId, :adId, :unavailableUntil);");
+        acceptQuery.bindValue(":userId", query.value(userIdIndex).toInt());
+        acceptQuery.bindValue(":adId", query.value(adIdIndex).toInt());
+        acceptQuery.bindValue(":unavailableUntil", QDateTime::currentDateTime().addSecs(1800).toString("yyyy-MM-dd hh:mm:ss"));
 
-        if(acceptQuery.exec(acceptQueryString)){
+        if(acceptQuery.exec()){
             QSqlQuery shekelsPopQuery(database);
-            QString shekelsPopQueryString = QString("UPDATE users SET shekels = shekels + '%1', pop_value = "
-                                                    "IF(pop_value >= '%2', pop_value - '%2', 0) "
-                                                    "WHERE name = '%3';")
-                                            .arg(jsonObj["adProfit"].toInt())
-                                            .arg(discontented)
-                                            .arg(jsonObj["user_name"].toString());
-            shekelsPopQuery.exec(shekelsPopQueryString);
+            shekelsPopQuery.prepare("UPDATE users SET shekels = shekels + :profit, pop_value = "
+                                    "IF(pop_value >= :discontented, pop_value - '%2', 0) "
+                                    "WHERE name = :userName;");
+            shekelsPopQuery.bindValue(":profit", jsonObj["adProfit"].toInt());
+            shekelsPopQuery.bindValue(":discontented", discontented);
+            shekelsPopQuery.bindValue(":userName", jsonObj["user_name"].toString());
+            shekelsPopQuery.exec();
         }
     }
 }
@@ -648,13 +665,13 @@ void CSCommunication::acceptAd(const QJsonObject &jsonObj)
 void CSCommunication::unforceMeme(const QString &memeName, const QString &userName)
 {
     QSqlQuery query(database);
-    QString queryString = QString(  "DELETE u_m FROM user_memes as u_m "
-                                    "INNER JOIN users as u ON user_id = u.id "
-                                    "INNER JOIN memes as m ON meme_id = m.id "
-                                    "WHERE m.name = '%1' and u.name = '%2';")
-                                    .arg(memeName)
-                                    .arg(userName);
-    query.exec(queryString);
+    query.prepare( "DELETE u_m FROM user_memes as u_m "
+                   "INNER JOIN users as u ON user_id = u.id "
+                   "INNER JOIN memes as m ON meme_id = m.id "
+                   "WHERE m.name = :memeName and u.name = :userName;");
+    query.bindValue(":memeName", memeName);
+    query.bindValue(":userName", userName);
+    query.exec();
 }
 
 void CSCommunication::increaseLikesQuantity(const QJsonObject &jsonObj)
@@ -676,18 +693,22 @@ void CSCommunication::increaseLikesQuantity(const QJsonObject &jsonObj)
     QSqlQuery likesQuery(database);
     QJsonDocument jsonDoc;
     jsonDoc.setArray(QJsonArray::fromVariantList(popValues));
-    QString queryString = QString("UPDATE memes SET pop_values = '%1', edited_by_user = 1 WHERE name='%2';")
-            .arg(QString(jsonDoc.toJson(QJsonDocument::Compact)))
-            .arg(jsonObj["meme_name"].toString());
-    if(likesQuery.exec(queryString)){
+    likesQuery.prepare("UPDATE memes SET pop_values = :popValues, edited_by_user = 1 WHERE name= :memeName;");
+    likesQuery.bindValue(":popValues", QString(jsonDoc.toJson(QJsonDocument::Compact)));
+    likesQuery.bindValue(":memeName", jsonObj["meme_name"].toString());
+
+    if(likesQuery.exec()){
         QSqlQuery updateShekelsQuery(database);
-        updateShekelsQuery.exec(QString("UPDATE users SET shekels = shekels - '%1' WHERE name = '%2';")
-                                       .arg(shekels)
-                                       .arg(jsonObj.value("user_name").toString()));
+        updateShekelsQuery.prepare("UPDATE users SET shekels = shekels - :shekels WHERE name = :userName;");
+        updateShekelsQuery.bindValue(":shekels", shekels);
+        updateShekelsQuery.bindValue(":userName", jsonObj.value("user_name").toString());
+        updateShekelsQuery.exec();
+
         updateShekelsQuery.clear();
-        updateShekelsQuery.exec(QString("UPDATE memes SET investedShekels = investedShekels + '%1' WHERE name = '%2';")
-                                        .arg(shekels)
-                                        .arg(jsonObj["meme_name"].toString()));
+        updateShekelsQuery.prepare("UPDATE memes SET investedShekels = investedShekels + :shekels WHERE name = :memeName;");
+        updateShekelsQuery.bindValue(":shekels", shekels);
+        updateShekelsQuery.bindValue(":memeName", jsonObj.value("meme_name").toString());
+        updateShekelsQuery.exec();
     }
     else
         database.open();
@@ -696,11 +717,11 @@ void CSCommunication::increaseLikesQuantity(const QJsonObject &jsonObj)
 void CSCommunication::rewardUserWithShekels(const QString &userName, const int &shekels)
 {
     QSqlQuery query(database);
-    QString queryString = QString("UPDATE users SET shekels = shekels + '%1' WHERE name = '%2';")
-            .arg(shekels)
-            .arg(userName);
+    query.prepare("UPDATE users SET shekels = shekels + :shekels WHERE name = :userName;");
+    query.bindValue(":shekels", shekels);
+    query.bindValue(":userName", userName);
 
-    if(!query.exec(queryString)){
+    if(!query.exec()){
         database.open();
         rewardUserWithShekels(userName, shekels);
     }

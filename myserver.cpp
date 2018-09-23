@@ -2,6 +2,7 @@
 #include "serverrunnable.h"
 #include "updatingdata.h"
 
+
 MyServer::MyServer(QObject* parent):
     QTcpServer(parent), upd(new UpdatingData())
 {
@@ -13,12 +14,11 @@ MyServer::MyServer(QObject* parent):
     fil.close();
     QJsonObject obj = QJsonDocument::fromJson(val.simplified().toUtf8()).object().value("Server").toObject();
 
-    if(listen(QHostAddress::Any, obj["port"].toString().toInt())){
+    if(listen(QHostAddress::Any, obj["port"].toString().toInt()))
         qDebug()<<"Listening...";
-    }
-    else{
+    else
         qDebug()<<"Error while starting!";
-    }
+
     threadPool->setMaxThreadCount(10);
 }
 
