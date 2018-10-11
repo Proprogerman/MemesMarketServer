@@ -22,7 +22,7 @@ public:
     ~UpdatingData();
 
     void connectToDatabase();
-    void vkApi();
+    void vkApi(const QVector<QString> &memesVkId);
     void updateUsersPopValues();
     void updateUsersCreativity();
     void updateUserAdTime();
@@ -33,7 +33,6 @@ private:
     QTimer *timer;
     QTimer *creativityTimer;
     QSqlDatabase database;
-    QMap<int, QString> memesMap;
     bool isConnected = false;
     QString accessToken;
 

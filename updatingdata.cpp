@@ -55,31 +55,22 @@ void UpdatingData::connectToDatabase(){
     }
 }
 
-void UpdatingData::vkApi(){
-    QMapIterator<int, QString> memesIter(memesMap);
+void UpdatingData::vkApi(const QVector<QString> &memesVkId){
     QString postsRequestString;
-    int postsCounter = 0;
-    while(memesIter.hasNext()){
-        memesIter.next();
-        postsCounter++;
+    for(int i = 0; i < memesVkId.size(); i++){
+        QString vkId = memesVkId[i];
         if(postsRequestString.isEmpty())
             postsRequestString = "https://api.vk.com/method/wall.getById?posts=";
-        postsRequestString.append(memesIter.value());
-        int idSize = 0;
-        while(idSize < memesIter.value().size() - 1){
-            if(memesIter.value().at(idSize) == '_')
-                break;
-            ++idSize;
-        }
-        if(memesIter.hasNext() && postsCounter < 100)
+        postsRequestString.append(vkId);
+
+        if(i < memesVkId.size() - 1 && (i % 99 != 0 || i == 0))
             postsRequestString.append(",");
 
-        if(!memesIter.hasNext() || postsCounter == 100){
+        if(i == memesVkId.size() - 1 || (i % 99 == 0 && i != 0)){
             postsRequestString.append("&extended=1&fields=members_count&v=5.80&access_token=");
             postsRequestString.append(accessToken);
             QNetworkReply *postsReply = mngr->get(QNetworkRequest(QUrl(postsRequestString)));
             connect(postsReply, &QNetworkReply::finished, [=](){updateMemesPopValues(postsReply);});
-            postsCounter = 0;
             postsRequestString.clear();
         }
     }
@@ -95,14 +86,15 @@ void UpdatingData::onTimerTriggered(){
     QSqlQuery query(database);
     if(query.exec("SELECT id, vk_id FROM memes;")){
         QSqlRecord rec = query.record();
-        int idIndex = rec.indexOf("id");
         int vk_idIndex = rec.indexOf("vk_id");
 
+        QVector<QString> memesVkId;
+
         while(query.next()){
-            memesMap.insert(query.value(idIndex).toInt(), query.value(vk_idIndex).toString());
+            memesVkId.append(query.value(vk_idIndex).toString());
         }
         if(!query.next()){
-            vkApi();
+            vkApi(memesVkId);
         }
     }
     else
@@ -158,10 +150,6 @@ void UpdatingData::checkMemesFromHub(QNetworkReply *reply)
 }
 
 void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
-    QSqlQuery query(database);
-    if(query.exec("SELECT id, pop_values, edited_by_user FROM memes;")){
-        QSqlRecord rec = query.record();
-        query.first();
         QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
         QJsonObject obj = doc.object().value("response").toObject();
         QJsonArray items = obj.value("items").toArray();
@@ -186,7 +174,15 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
             int popValue = qCeil(activity * 1.0 / members) + randPart;
             popValue = popValue < 0 ? 0 : popValue;
 
-            QString postId = QString::number(item["owner_id"].toInt()) + '_' + QString::number(item["id"].toInt());
+            QString postId = QString::number(ownerId) + '_' + QString::number(item["id"].toInt());
+
+            QSqlQuery query(database);
+            query.prepare("SELECT pop_values, edited_by_user FROM memes WHERE vk_id = :vkId;");
+            query.bindValue(":vkId", postId);
+            query.exec();
+            QSqlRecord rec = query.record();
+            query.first();
+
             bool editedByUser = query.value(rec.indexOf("edited_by_user")).toBool();
             if(!editedByUser){
                 QJsonArray popArr = QJsonDocument::fromJson(query.value(rec.indexOf("pop_values")).toByteArray()).array();
@@ -210,16 +206,12 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
             else{
                 QSqlQuery updateQuery;
                 updateQuery.prepare("UPDATE memes SET edited_by_user = 0 WHERE vk_id = :postId;");
-                updateQuery.bindValue(":memeId", postId);
+                updateQuery.bindValue(":postId", postId);
                 updateQuery.exec();
             }
-            query.next();
         }
         updateUsersPopValues();
-    }
-    else
-        database.open();
-    reply->deleteLater();
+        reply->deleteLater();
 }
 
 void UpdatingData::updateUsersPopValues(){
@@ -261,10 +253,11 @@ void UpdatingData::updateUsersPopValues(){
                     query.bindValue(":userName", name);
                     query.exec();
                 }
-                else
+                else{
                     query.prepare("UPDATE users SET pop_value = 0 WHERE name = :userName;");
                     query.bindValue(":userName", name);
                     query.exec();
+                }
             }
         }
     }
