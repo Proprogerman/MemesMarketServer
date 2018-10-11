@@ -167,8 +167,6 @@ void UpdatingData::updateMemesPopValues(QNetworkReply *reply){
         QJsonArray items = obj.value("items").toArray();
         QJsonArray groups = obj.value("groups").toArray();
 
-        QVector<QString> updatedMemes;
-
         for(int i = 0; i < items.size(); i++){
             QJsonObject item = items[i].toObject();
             int likes = item.value("likes").toObject().value("count").toInt();
